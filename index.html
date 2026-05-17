@@ -28,9 +28,14 @@
         <option value="reverse">Reverse Perpendicular</option>
         <option value="forward">Forward Pull-In</option>
       </select>
+      <div class="value-row">
+        <label class="cl cl-spaced" for="angle-range">Lot Angle</label>
+        <div class="control-value" id="angle-value">0°</div>
+      </div>
+      <input id="angle-range" type="range" min="0" max="45" step="1" value="0">
       <div class="speed-row">
         <label class="cl cl-spaced" for="speed-range">Speed</label>
-        <div class="speed-value" id="speed-value">1.0x</div>
+        <div class="control-value" id="speed-value">1.0x</div>
       </div>
       <input id="speed-range" type="range" min="25" max="200" step="5" value="100">
     </div>

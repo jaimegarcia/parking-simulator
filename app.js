@@ -7,13 +7,12 @@ CV.width=CW; CV.height=CH;
 const SPOT_W=72, SPOT_H=98, TOP_Y=10;
 const BOT_Y=CH-15-SPOT_H, LANE_TOP=TOP_Y+SPOT_H, LANE_BOT=BOT_Y;
 const LANE_H=LANE_BOT-LANE_TOP, LANE_MID=(LANE_TOP+LANE_BOT)/2;
-const NCOLS=4, MARGIN=(CW - (NCOLS - 1) * SPOT_W) / 2, PITCH=SPOT_W;
-const SPOT_CXS=Array.from({length:NCOLS},(_,i)=>MARGIN+i*PITCH);
+const NCOLS=4, BASE_PITCH=SPOT_W;
 const PARKED_CAR_LINE_GAP=12;
 
 const SPOTS=[];
-for(let i=0;i<4;i++) SPOTS.push({idx:i, cx:SPOT_CXS[i], cy:TOP_Y+SPOT_H/2, row:'top'});
-for(let i=0;i<4;i++) SPOTS.push({idx:4+i, cx:SPOT_CXS[i], cy:BOT_Y+SPOT_H/2, row:'bot'});
+for(let i=0;i<4;i++) SPOTS.push({idx:i, col:i, cy:TOP_Y+SPOT_H/2, row:'top'});
+for(let i=0;i<4;i++) SPOTS.push({idx:4+i, col:i, cy:BOT_Y+SPOT_H/2, row:'bot'});
 
 const CAR_LEN=68, CAR_WID=28, WB=46, RA_BACK=12, RA_FRONT=RA_BACK+WB;
 const WW=5, WH=12;
@@ -24,8 +23,77 @@ let raf=null, lastT=null;
 let targetIdx=5, maneuver='reverse';
 let obstacles=new Set(), obsPolys=[];
 let speedScale=100;
+let parkingAngleDeg=0;
 
 function startPos(){ return {x:30, y:LANE_MID, heading:0}; }
+
+function normAngle(theta) {
+  return Math.atan2(Math.sin(theta), Math.cos(theta));
+}
+
+function parkingAngleRad() {
+  return parkingAngleDeg * Math.PI / 180;
+}
+
+function spotPitch() {
+  return BASE_PITCH;
+}
+
+function spotMouthLeftX(sp) {
+  const pitch = spotPitch();
+  const margin = (CW - NCOLS * pitch) / 2;
+  return margin + sp.col * pitch;
+}
+
+function spotInwardTheta(sp) {
+  const a = parkingAngleRad();
+  return sp.row === 'top' ? -Math.PI / 2 + a : Math.PI / 2 - a;
+}
+
+function spotAislePoint(sp) {
+  return {x: spotMouthLeftX(sp) + spotPitch() / 2, y: sp.row === 'top' ? LANE_TOP : LANE_BOT};
+}
+
+function pointFromSpotAisle(sp, distance) {
+  const t = spotInwardTheta(sp);
+  const a = spotAislePoint(sp);
+  return {
+    x: a.x + Math.cos(t) * distance,
+    y: a.y + Math.sin(t) * distance
+  };
+}
+
+function spotCenter(sp) {
+  return pointFromSpotAisle(sp, SPOT_H / 2);
+}
+
+function spotLabelPoint(sp) {
+  return pointFromSpotAisle(sp, SPOT_H * .48);
+}
+
+function spotPolygon(sp) {
+  const t = spotInwardTheta(sp);
+  const y = sp.row === 'top' ? LANE_TOP : LANE_BOT;
+  const ix = Math.cos(t), iy = Math.sin(t);
+  const left = {x: spotMouthLeftX(sp), y};
+  const right = {x: left.x + spotPitch(), y};
+  return [
+    left,
+    right,
+    {x: right.x + ix * SPOT_H, y: right.y + iy * SPOT_H},
+    {x: left.x + ix * SPOT_H, y: left.y + iy * SPOT_H}
+  ];
+}
+
+function pointInPoly(point, poly) {
+  let inside = false;
+  for(let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const pi = poly[i], pj = poly[j];
+    const crosses = (pi.y > point.y) !== (pj.y > point.y);
+    if(crosses && point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x) inside = !inside;
+  }
+  return inside;
+}
 
 function getCarPoly(x, y, theta) {
   const cos = Math.cos(theta), sin = Math.sin(theta);
@@ -56,11 +124,9 @@ function updateObstacles() {
   obsPolys = [];
   SPOTS.forEach(sp => {
     if(obstacles.has(sp.idx) && sp.idx !== targetIdx) {
-      let h = sp.row === 'top' ? -Math.PI/2 : Math.PI/2;
-      let ra_y = sp.row === 'top'
-        ? sp.cy + SPOT_H/2 - RA_BACK - PARKED_CAR_LINE_GAP
-        : sp.cy - SPOT_H/2 + RA_BACK + PARKED_CAR_LINE_GAP;
-      obsPolys.push(getCarPoly(sp.cx, ra_y, h));
+      const h = spotInwardTheta(sp);
+      const pos = pointFromSpotAisle(sp, RA_BACK + PARKED_CAR_LINE_GAP);
+      obsPolys.push(getCarPoly(pos.x, pos.y, h));
     }
   });
 }
@@ -102,18 +168,13 @@ function arcDiff(a, b) {
 
 function targetPose(sp, maneuver) {
   const reverse = maneuver === 'reverse';
-  if(sp.row === 'bot') {
-    return {
-      x: sp.cx,
-      y: reverse ? BOT_Y + SPOT_H - RA_BACK - 8 : BOT_Y + RA_BACK + 8,
-      theta: reverse ? -Math.PI/2 : Math.PI/2
-    };
-  }
-
+  const distance = reverse ? SPOT_H - RA_BACK - 8 : RA_BACK + 8;
+  const pos = pointFromSpotAisle(sp, distance);
+  const inward = spotInwardTheta(sp);
   return {
-    x: sp.cx,
-    y: reverse ? TOP_Y + RA_BACK + 8 : TOP_Y + SPOT_H - RA_BACK - 8,
-    theta: reverse ? Math.PI/2 : -Math.PI/2
+    x: pos.x,
+    y: pos.y,
+    theta: normAngle(reverse ? inward + Math.PI : inward)
   };
 }
 
@@ -134,7 +195,9 @@ function planPathAStar(spotIdx, maneuver) {
   const STEERS = [-MAX_STEER, -MAX_STEER * .48, 0, MAX_STEER * .48, MAX_STEER];
   const GOAL_DIST = 15, GOAL_ANGLE = 0.38;
   const MAX_ITERS = 90000;
-  let wpX = maneuver === 'reverse' ? sp.cx + PITCH * .38 : sp.cx - PITCH * .38;
+  const pitch = spotPitch();
+  const spotX = spotAislePoint(sp).x;
+  let wpX = maneuver === 'reverse' ? spotX + pitch * .38 : spotX - pitch * .38;
   let wpY = sp.row === 'bot' ? LANE_TOP + 24 : LANE_BOT - 24;
 
   while(open.data.length > 0 && iters < MAX_ITERS) {
@@ -283,33 +346,43 @@ function planPathByManeuver(spotIdx, maneuver) {
   const target = targetPose(sp, maneuver);
   const targetHeading = target.theta;
   const rowDir = sp.row === 'bot' ? 1 : -1;
+  const pitch = spotPitch();
   const offsets = maneuver === 'reverse'
-    ? [PITCH * .62, PITCH * .45, PITCH * .8, PITCH * .3, PITCH]
-    : [-PITCH * 1.25, -PITCH * 1.05, -PITCH * 1.5, -PITCH * .85, -PITCH * .65];
+    ? [pitch * .62, pitch * .45, pitch * .8, pitch * .3, pitch]
+    : [-pitch * 1.25, -pitch * 1.05, -pitch * 1.5, -pitch * .85, -pitch * .65];
   const sideYs = [LANE_MID, LANE_MID - rowDir * 12, LANE_MID + rowDir * 10, LANE_MID - rowDir * 24];
+  const angle = parkingAngleRad();
+  const approachHeadings = maneuver === 'reverse' && angle > 0.01
+    ? [0, -rowDir * angle * .62, -rowDir * angle * .4, -rowDir * angle * .85]
+    : [0];
+  const finalHandleAs = maneuver === 'reverse' && angle > 0.01 ? [56, 82, 100, 120] : [maneuver === 'forward' ? 96 : 56];
+  const finalHandleBs = maneuver === 'reverse' && angle > 0.01 ? [40, 64, 82, 100] : [maneuver === 'forward' ? 34 : 40];
 
   for(const offset of offsets) {
     for(const y of sideYs) {
-      const stage = {x: Math.max(32, Math.min(CW - 32, sp.cx + offset)), y};
-      const approachHeading = 0;
-      const approachHandle = Math.max(12, Math.min(50, stage.x - start.x));
-      const first = buildCurve(start, stage, 0, approachHeading, 1, 'Forward', approachHandle, Math.min(36, approachHandle), 34);
-      const finalGear = maneuver === 'reverse' ? -1 : 1;
-      const label = maneuver === 'reverse' ? 'Reverse' : 'Forward';
-      const finalStartHeading = approachHeading;
-      const finalHandleA = maneuver === 'forward' ? 96 : 56;
-      const finalHandleB = maneuver === 'forward' ? 34 : 40;
-      const second = buildCurve(stage, target, finalStartHeading, targetHeading, finalGear, label, finalHandleA, finalHandleB, 52);
-      const segs = first.concat(second.slice(1));
+      const stage = {x: Math.max(32, Math.min(CW - 32, target.x + offset)), y};
+      for(const approachHeading of approachHeadings) {
+        const approachHandle = Math.max(12, Math.min(90, stage.x - start.x));
+        const first = buildCurve(start, stage, 0, approachHeading, 1, 'Forward', approachHandle, Math.min(36, approachHandle), 34);
+        const finalGear = maneuver === 'reverse' ? -1 : 1;
+        const label = maneuver === 'reverse' ? 'Reverse' : 'Forward';
+        const finalStartHeading = approachHeading;
+        for(const finalHandleA of finalHandleAs) {
+          for(const finalHandleB of finalHandleBs) {
+            const second = buildCurve(stage, target, finalStartHeading, targetHeading, finalGear, label, finalHandleA, finalHandleB, 52);
+            const segs = first.concat(second.slice(1));
 
-      for(let i = 1; i < segs.length; i++) {
-        const prev = segs[i - 1];
-        const curr = segs[i];
-        curr.steer = Math.max(-0.64, Math.min(0.64, arcDiff(prev.theta, curr.theta) * 1.8));
-      }
+            for(let i = 1; i < segs.length; i++) {
+              const prev = segs[i - 1];
+              const curr = segs[i];
+              curr.steer = Math.max(-0.64, Math.min(0.64, arcDiff(prev.theta, curr.theta) * 1.8));
+            }
 
-      if(pathClear(segs)) {
-        return finalizePath(segs, 7);
+            if(pathClear(segs)) {
+              return finalizePath(segs, 7);
+            }
+          }
+        }
       }
     }
   }
@@ -396,6 +469,17 @@ function rr(x,y,w,h,r){
   ctx.arcTo(x,y+h,x,y+h-R,R); ctx.lineTo(x,y+R); ctx.arcTo(x,y,x+R,y,R); ctx.closePath();
 }
 
+function tracePoly(poly) {
+  ctx.beginPath();
+  ctx.moveTo(poly[0].x, poly[0].y);
+  for(let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+  ctx.closePath();
+}
+
+function lerpPoint(a, b, t) {
+  return {x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t};
+}
+
 function drawLot(c){
   ctx.fillStyle=c.asp; ctx.fillRect(0,0,CW,CH);
   ctx.strokeStyle=c.grid; ctx.lineWidth=1;
@@ -406,18 +490,20 @@ function drawLot(c){
   [LANE_TOP,LANE_BOT].forEach(y=>{ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke();});
   
   SPOTS.forEach(sp=>{
-    const sx=sp.cx-SPOT_W/2, sy=sp.row==='top'?TOP_Y:BOT_Y, isTgt=sp.idx===targetIdx;
-    ctx.fillStyle=isTgt?c.tf:c.sf; rr(sx,sy,SPOT_W,SPOT_H,4); ctx.fill();
+    const poly=spotPolygon(sp), labelPoint=spotLabelPoint(sp), isTgt=sp.idx===targetIdx;
+    ctx.fillStyle=isTgt?c.tf:c.sf; tracePoly(poly); ctx.fill();
     ctx.strokeStyle=isTgt?c.tl:c.sl; ctx.lineWidth=isTgt?1.5:.5;
-    rr(sx+.5,sy+.5,SPOT_W-1,SPOT_H-1,4); ctx.stroke();
+    tracePoly(poly); ctx.stroke();
     ctx.fillStyle=isTgt?c.tl:c.txt; ctx.font=`${isTgt?'500 ':''}11px monospace`; 
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(String(sp.idx),sp.cx,sp.cy+(sp.row==='top'?18:-18));
+    ctx.fillText(String(sp.idx),labelPoint.x,labelPoint.y);
     if(isTgt){
       ctx.strokeStyle=c.tx; ctx.lineWidth=1.5; ctx.setLineDash([5,4]);
-      const m=13;
-      ctx.beginPath();ctx.moveTo(sx+m,sy+m);ctx.lineTo(sx+SPOT_W-m,sy+SPOT_H-m);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(sx+SPOT_W-m,sy+m);ctx.lineTo(sx+m,sy+SPOT_H-m);ctx.stroke();
+      const m=.18;
+      const a=lerpPoint(poly[0],poly[2],m), b=lerpPoint(poly[2],poly[0],m);
+      const c1=lerpPoint(poly[1],poly[3],m), d=lerpPoint(poly[3],poly[1],m);
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(c1.x,c1.y);ctx.lineTo(d.x,d.y);ctx.stroke();
       ctx.setLineDash([]);
     }
   });
@@ -475,11 +561,9 @@ function drawCar(rx,ry,heading,steer,bodyC,roofC,glassC,c){
 function drawObstacles(c){
   SPOTS.forEach(sp=>{
     if(!obstacles.has(sp.idx)||sp.idx===targetIdx)return;
-    const h=sp.row==='top'?-Math.PI/2:Math.PI/2;
-    const ra_y=sp.row==='top'
-      ? sp.cy+SPOT_H/2-RA_BACK-PARKED_CAR_LINE_GAP
-      : sp.cy-SPOT_H/2+RA_BACK+PARKED_CAR_LINE_GAP;
-    drawCar(sp.cx,ra_y,h,0,c.ob,c.obr,c.obg,c);
+    const h=spotInwardTheta(sp);
+    const pos=pointFromSpotAisle(sp,RA_BACK+PARKED_CAR_LINE_GAP);
+    drawCar(pos.x,pos.y,h,0,c.ob,c.obr,c.obg,c);
   });
 }
 
@@ -501,13 +585,30 @@ function draw(){
 const SPD=100;
 function setSpeedFromControl() {
   const speedRange = document.getElementById('speed-range');
-  speedScale = speedRange ? parseInt(speedRange.value, 10) : speedScale;
+  const next = speedRange ? parseInt(speedRange.value, 10) : speedScale;
+  speedScale = Number.isFinite(next) ? next : speedScale;
   updateSpeedControl();
 }
 
 function updateSpeedControl() {
   const speedValue = document.getElementById('speed-value');
   if(speedValue) speedValue.textContent = (speedScale / 100).toFixed(2).replace(/0$/, '') + 'x';
+}
+
+function setAngleFromControl() {
+  const angleRange = document.getElementById('angle-range');
+  const next = angleRange ? parseInt(angleRange.value, 10) : parkingAngleDeg;
+  parkingAngleDeg = Number.isFinite(next) ? Math.max(0, Math.min(45, next)) : parkingAngleDeg;
+  updateAngleControl();
+  if(state !== 'running') {
+    path = null;
+    reset();
+  }
+}
+
+function updateAngleControl() {
+  const angleValue = document.getElementById('angle-value');
+  if(angleValue) angleValue.textContent = `${parkingAngleDeg}°`;
 }
 
 function reset(){
@@ -517,6 +618,8 @@ function reset(){
   traj=[]; path=null; dist=0; state='idle'; lastT=null;
   document.getElementById('btn-start').disabled=false;
   document.getElementById('btn-start').textContent="Start Auto-Park";
+  const angleRange=document.getElementById('angle-range');
+  if(angleRange) angleRange.disabled=false;
   updateObstacles(); updateStats(null); draw();
 }
 
@@ -539,6 +642,8 @@ function startAnim(){
     state='running';
     document.getElementById('btn-start').textContent="Parking...";
     document.getElementById('btn-start').disabled=true;
+    const angleRange=document.getElementById('angle-range');
+    if(angleRange) angleRange.disabled=true;
     raf=requestAnimationFrame(loop);
   }, 50);
 }
@@ -548,7 +653,13 @@ function loop(ts){
   const dt=Math.min((ts-lastT)/1000,.05); lastT=ts;
   dist+=SPD*(speedScale / 100)*pathSpeedFactor(path, dist)*dt;
   
-  if(dist>=path.totalLen){dist=path.totalLen; state='done'; document.getElementById('btn-start').disabled=false; document.getElementById('btn-start').textContent="Start Auto-Park";}
+  if(dist>=path.totalLen){
+    dist=path.totalLen; state='done';
+    document.getElementById('btn-start').disabled=false;
+    document.getElementById('btn-start').textContent="Start Auto-Park";
+    const angleRange=document.getElementById('angle-range');
+    if(angleRange) angleRange.disabled=false;
+  }
   
   const pose=walkDiscretePath(path,dist);
   if(pose){
@@ -577,8 +688,7 @@ CV.addEventListener('mousedown', e => {
 
   for(let sp of SPOTS) {
     if(sp.idx === targetIdx) continue;
-    let sx = sp.cx - SPOT_W/2, sy = sp.row === 'top' ? TOP_Y : BOT_Y;
-    if(cx >= sx && cx <= sx + SPOT_W && cy >= sy && cy <= sy + SPOT_H) {
+    if(pointInPoly({x: cx, y: cy}, spotPolygon(sp))) {
       if(obstacles.has(sp.idx)) obstacles.delete(sp.idx); else obstacles.add(sp.idx);
       updateObstacles(); draw(); break;
     }
@@ -587,6 +697,8 @@ CV.addEventListener('mousedown', e => {
 
 document.getElementById('sel-spot').onchange=e=>{targetIdx=parseInt(e.target.value); obstacles.delete(targetIdx); if(state!=='running'){path=null;reset();}};
 document.getElementById('sel-man').onchange=e=>{maneuver=e.target.value; if(state!=='running'){path=null;reset();}};
+document.getElementById('angle-range').addEventListener('input', setAngleFromControl);
+document.getElementById('angle-range').addEventListener('change', setAngleFromControl);
 document.getElementById('speed-range').addEventListener('input', setSpeedFromControl);
 document.getElementById('speed-range').addEventListener('change', setSpeedFromControl);
 document.getElementById('btn-obs').onclick=()=>{
@@ -597,6 +709,7 @@ document.getElementById('btn-obs').onclick=()=>{
 document.getElementById('btn-start').onclick=startAnim;
 document.getElementById('btn-reset').onclick=reset;
 
+updateAngleControl();
 setSpeedFromControl();
 reset();
 })();
