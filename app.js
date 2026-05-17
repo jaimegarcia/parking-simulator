@@ -600,7 +600,7 @@ function setAngleFromControl() {
   const next = angleRange ? parseInt(angleRange.value, 10) : parkingAngleDeg;
   parkingAngleDeg = Number.isFinite(next) ? Math.max(0, Math.min(45, next)) : parkingAngleDeg;
   updateAngleControl();
-  if(state !== 'running') {
+  if(state === 'idle' || state === 'done') {
     path = null;
     reset();
   }
@@ -611,21 +611,44 @@ function updateAngleControl() {
   if(angleValue) angleValue.textContent = `${parkingAngleDeg}°`;
 }
 
+function updateActionControls() {
+  const isActive = state === 'running' || state === 'paused' || state === 'planning';
+  const isPaused = state === 'paused';
+  const btnStart = document.getElementById('btn-start');
+  const btnPause = document.getElementById('btn-pause');
+  const angleRange = document.getElementById('angle-range');
+  const selSpot = document.getElementById('sel-spot');
+  const selMan = document.getElementById('sel-man');
+  const btnObs = document.getElementById('btn-obs');
+
+  if(btnStart) {
+    btnStart.disabled = isActive;
+    btnStart.textContent = state === 'planning' ? 'Planning...' : state === 'running' || state === 'paused' ? 'Parking...' : 'Start Auto-Park';
+  }
+  if(btnPause) {
+    btnPause.disabled = !(state === 'running' || state === 'paused');
+    btnPause.textContent = isPaused ? 'Resume Parking' : 'Pause Parking';
+    if(btnPause.classList) btnPause.classList.toggle('is-paused', isPaused);
+  }
+  if(angleRange) angleRange.disabled = isActive;
+  if(selSpot) selSpot.disabled = isActive;
+  if(selMan) selMan.disabled = isActive;
+  if(btnObs) btnObs.disabled = isActive;
+}
+
 function reset(){
   cancelAnimationFrame(raf); raf=null;
   const s=startPos();
   car={x:s.x,y:s.y,heading:s.heading,steerAngle:0};
   traj=[]; path=null; dist=0; state='idle'; lastT=null;
-  document.getElementById('btn-start').disabled=false;
-  document.getElementById('btn-start').textContent="Start Auto-Park";
-  const angleRange=document.getElementById('angle-range');
-  if(angleRange) angleRange.disabled=false;
+  updateActionControls();
   updateObstacles(); updateStats(null); draw();
 }
 
 function startAnim(){
-  if(state==='running')return;
-  document.getElementById('btn-start').textContent="Planning...";
+  if(state === 'running' || state === 'paused' || state === 'planning') return;
+  state = 'planning';
+  updateActionControls();
   setTimeout(()=>{
     const s=startPos();
     car={x:s.x,y:s.y,heading:s.heading,steerAngle:0};
@@ -640,25 +663,36 @@ function startAnim(){
     }
     
     state='running';
-    document.getElementById('btn-start').textContent="Parking...";
-    document.getElementById('btn-start').disabled=true;
-    const angleRange=document.getElementById('angle-range');
-    if(angleRange) angleRange.disabled=true;
+    updateActionControls();
     raf=requestAnimationFrame(loop);
   }, 50);
 }
 
+function togglePause(){
+  if(state === 'running') {
+    state = 'paused';
+    cancelAnimationFrame(raf); raf = null; lastT = null;
+    updateActionControls();
+    draw();
+    return;
+  }
+  if(state === 'paused') {
+    state = 'running';
+    lastT = null;
+    updateActionControls();
+    raf = requestAnimationFrame(loop);
+  }
+}
+
 function loop(ts){
+  if(state !== 'running') return;
   if(!lastT) lastT=ts;
   const dt=Math.min((ts-lastT)/1000,.05); lastT=ts;
   dist+=SPD*(speedScale / 100)*pathSpeedFactor(path, dist)*dt;
   
   if(dist>=path.totalLen){
     dist=path.totalLen; state='done';
-    document.getElementById('btn-start').disabled=false;
-    document.getElementById('btn-start').textContent="Start Auto-Park";
-    const angleRange=document.getElementById('angle-range');
-    if(angleRange) angleRange.disabled=false;
+    updateActionControls();
   }
   
   const pose=walkDiscretePath(path,dist);
@@ -681,7 +715,7 @@ function updateStats(pose){
 }
 
 CV.addEventListener('mousedown', e => {
-  if(state === 'running') return;
+  if(state === 'running' || state === 'paused' || state === 'planning') return;
   const rect = CV.getBoundingClientRect();
   const scaleX = CV.width / rect.width, scaleY = CV.height / rect.height;
   const cx = (e.clientX - rect.left) * scaleX, cy = (e.clientY - rect.top) * scaleY;
@@ -695,8 +729,8 @@ CV.addEventListener('mousedown', e => {
   }
 });
 
-document.getElementById('sel-spot').onchange=e=>{targetIdx=parseInt(e.target.value); obstacles.delete(targetIdx); if(state!=='running'){path=null;reset();}};
-document.getElementById('sel-man').onchange=e=>{maneuver=e.target.value; if(state!=='running'){path=null;reset();}};
+document.getElementById('sel-spot').onchange=e=>{targetIdx=parseInt(e.target.value); obstacles.delete(targetIdx); if(state==='idle'||state==='done'){path=null;reset();}};
+document.getElementById('sel-man').onchange=e=>{maneuver=e.target.value; if(state==='idle'||state==='done'){path=null;reset();}};
 document.getElementById('angle-range').addEventListener('input', setAngleFromControl);
 document.getElementById('angle-range').addEventListener('change', setAngleFromControl);
 document.getElementById('speed-range').addEventListener('input', setSpeedFromControl);
@@ -704,9 +738,10 @@ document.getElementById('speed-range').addEventListener('change', setSpeedFromCo
 document.getElementById('btn-obs').onclick=()=>{
   obstacles.clear();
   SPOTS.forEach(sp=>{ if(sp.idx!==targetIdx&&Math.random()>.5) obstacles.add(sp.idx); });
-  if(state!=='running'){path=null;reset();}
+  if(state==='idle'||state==='done'){path=null;reset();}
 };
 document.getElementById('btn-start').onclick=startAnim;
+document.getElementById('btn-pause').onclick=togglePause;
 document.getElementById('btn-reset').onclick=reset;
 
 updateAngleControl();

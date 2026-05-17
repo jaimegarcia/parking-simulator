@@ -49,7 +49,12 @@ button { margin-top: 4px; transition: 0.1s; }
 button:hover { filter: brightness(1.08); }
 button:active { transform: scale(.98); }
 #btn-start { background: var(--color-background-info); color: var(--color-text-info); border-color: var(--color-border-info); font-weight: 500; }
-#btn-start:disabled { opacity: .4; cursor: not-allowed; }
+#btn-pause.is-paused { background: var(--color-background-info); color: var(--color-text-info); border-color: var(--color-border-info); font-weight: 500; }
+#btn-start:disabled,
+#btn-pause:disabled,
+#btn-obs:disabled,
+select:disabled,
+input[type="range"]:disabled { opacity: .4; cursor: not-allowed; }
 .speed-row,
 .value-row { display: flex; align-items: baseline; justify-content: space-between; }
 .control-value { font-size: 11px; color: var(--color-text-info); }
