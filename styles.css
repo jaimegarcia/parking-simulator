@@ -50,6 +50,9 @@ button:hover { filter: brightness(1.08); }
 button:active { transform: scale(.98); }
 #btn-start { background: var(--color-background-info); color: var(--color-text-info); border-color: var(--color-border-info); font-weight: 500; }
 #btn-start:disabled { opacity: .4; cursor: not-allowed; }
+.speed-row { display: flex; align-items: baseline; justify-content: space-between; }
+.speed-value { font-size: 11px; color: var(--color-text-info); }
+input[type="range"] { width: 100%; accent-color: var(--color-text-info); cursor: pointer; }
 #stats { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 .st { flex: 1; min-width: 70px; background: var(--color-background-primary); border-radius: var(--border-radius-md); padding: 7px 10px; border: 0.5px solid var(--color-border-tertiary); }
 .sv { font-size: 15px; font-weight: 500; color: var(--color-text-primary); }

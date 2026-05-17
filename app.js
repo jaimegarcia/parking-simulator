@@ -23,6 +23,7 @@ let traj=[], path=null, dist=0, state='idle';
 let raf=null, lastT=null;
 let targetIdx=5, maneuver='reverse';
 let obstacles=new Set(), obsPolys=[];
+let speedScale=1;
 
 function startPos(){ return {x:30, y:LANE_MID, heading:0}; }
 
@@ -284,18 +285,21 @@ function planPathByManeuver(spotIdx, maneuver) {
   const rowDir = sp.row === 'bot' ? 1 : -1;
   const offsets = maneuver === 'reverse'
     ? [PITCH * .62, PITCH * .45, PITCH * .8, PITCH * .3, PITCH]
-    : [-PITCH * .56, -PITCH * .38, -PITCH * .72, -PITCH * .24, -PITCH * .9];
+    : [-PITCH * 1.25, -PITCH * 1.05, -PITCH * 1.5, -PITCH * .85, -PITCH * .65];
   const sideYs = [LANE_MID, LANE_MID - rowDir * 12, LANE_MID + rowDir * 10, LANE_MID - rowDir * 24];
 
   for(const offset of offsets) {
     for(const y of sideYs) {
       const stage = {x: Math.max(32, Math.min(CW - 32, sp.cx + offset)), y};
       const approachHeading = 0;
-      const first = buildCurve(start, stage, 0, approachHeading, 1, 'Forward', Math.max(50, stage.x - start.x), 36, 34);
+      const approachHandle = Math.max(12, Math.min(50, stage.x - start.x));
+      const first = buildCurve(start, stage, 0, approachHeading, 1, 'Forward', approachHandle, Math.min(36, approachHandle), 34);
       const finalGear = maneuver === 'reverse' ? -1 : 1;
       const label = maneuver === 'reverse' ? 'Reverse' : 'Forward';
       const finalStartHeading = approachHeading;
-      const second = buildCurve(stage, target, finalStartHeading, targetHeading, finalGear, label, 56, 40, 42);
+      const finalHandleA = maneuver === 'forward' ? 96 : 56;
+      const finalHandleB = maneuver === 'forward' ? 34 : 40;
+      const second = buildCurve(stage, target, finalStartHeading, targetHeading, finalGear, label, finalHandleA, finalHandleB, 52);
       const segs = first.concat(second.slice(1));
 
       for(let i = 1; i < segs.length; i++) {
@@ -495,6 +499,11 @@ function draw(){
 }
 
 const SPD=100;
+function updateSpeedControl() {
+  const speedValue = document.getElementById('speed-value');
+  if(speedValue) speedValue.textContent = speedScale.toFixed(2).replace(/0$/, '') + 'x';
+}
+
 function reset(){
   cancelAnimationFrame(raf); raf=null;
   const s=startPos();
@@ -531,7 +540,7 @@ function startAnim(){
 function loop(ts){
   if(!lastT) lastT=ts;
   const dt=Math.min((ts-lastT)/1000,.05); lastT=ts;
-  dist+=SPD*pathSpeedFactor(path, dist)*dt;
+  dist+=SPD*speedScale*pathSpeedFactor(path, dist)*dt;
   
   if(dist>=path.totalLen){dist=path.totalLen; state='done'; document.getElementById('btn-start').disabled=false; document.getElementById('btn-start').textContent="Start Auto-Park";}
   
@@ -572,6 +581,7 @@ CV.addEventListener('mousedown', e => {
 
 document.getElementById('sel-spot').onchange=e=>{targetIdx=parseInt(e.target.value); obstacles.delete(targetIdx); if(state!=='running'){path=null;reset();}};
 document.getElementById('sel-man').onchange=e=>{maneuver=e.target.value; if(state!=='running'){path=null;reset();}};
+document.getElementById('speed-range').oninput=e=>{speedScale=parseFloat(e.target.value); updateSpeedControl();};
 document.getElementById('btn-obs').onclick=()=>{
   obstacles.clear();
   SPOTS.forEach(sp=>{ if(sp.idx!==targetIdx&&Math.random()>.5) obstacles.add(sp.idx); });
@@ -580,5 +590,6 @@ document.getElementById('btn-obs').onclick=()=>{
 document.getElementById('btn-start').onclick=startAnim;
 document.getElementById('btn-reset').onclick=reset;
 
+updateSpeedControl();
 reset();
 })();
