@@ -210,9 +210,8 @@ function planPathAStar(spotIdx, maneuver) {
     p.push({x: tX, y: tY, theta: tTheta, g: last.g, f: last.f, gear: last.gear, steer: 0, parent: last, label: last.gear === 1 ? 'Forward' : 'Reverse'});
   }
   
-  let totalLen = (p.length - 1) * STEP;
   for(let i=1; i<p.length; i++) p[i].label = p[i].gear === 1 ? 'Forward' : 'Reverse';
-  return { segs: p, totalLen, step: STEP };
+  return finalizePath(p, STEP);
 }
 
 function bezierPoint(p0, p1, p2, p3, t) {
@@ -262,6 +261,21 @@ function pathClear(segs) {
   return true;
 }
 
+function finalizePath(segs, fallbackStep) {
+  const distances = [0];
+  for(let i = 1; i < segs.length; i++) {
+    const prev = segs[i - 1], curr = segs[i];
+    distances[i] = distances[i - 1] + Math.hypot(curr.x - prev.x, curr.y - prev.y);
+  }
+
+  return {
+    segs,
+    totalLen: distances[distances.length - 1] || Math.max(1, segs.length - 1) * fallbackStep,
+    step: fallbackStep,
+    distances
+  };
+}
+
 function planPathByManeuver(spotIdx, maneuver) {
   const sp = SPOTS[spotIdx];
   const start = startPos();
@@ -291,7 +305,7 @@ function planPathByManeuver(spotIdx, maneuver) {
       }
 
       if(pathClear(segs)) {
-        return { segs, totalLen: Math.max(1, segs.length - 1) * 7, step: 7 };
+        return finalizePath(segs, 7);
       }
     }
   }
@@ -301,6 +315,30 @@ function planPathByManeuver(spotIdx, maneuver) {
 
 function planParkingPath(spotIdx, maneuver) {
   return planPathByManeuver(spotIdx, maneuver) || planPathAStar(spotIdx, maneuver);
+}
+
+function pathSegmentAt(pathData, d) {
+  const segs = pathData.segs;
+  if(!pathData.distances) {
+    const idx = Math.min(segs.length - 2, Math.max(0, Math.floor(d / pathData.step)));
+    return {idx, t: (d % pathData.step) / pathData.step};
+  }
+
+  const distances = pathData.distances;
+  let idx = 0;
+  while(idx < distances.length - 2 && distances[idx + 1] < d) idx++;
+  const span = distances[idx + 1] - distances[idx];
+  return {idx, t: span > 0 ? (d - distances[idx]) / span : 0};
+}
+
+function pathSpeedFactor(pathData, d) {
+  const {idx} = pathSegmentAt(pathData, d);
+  const p1 = pathData.segs[idx], p2 = pathData.segs[idx + 1];
+  const span = pathData.distances
+    ? Math.max(.001, pathData.distances[idx + 1] - pathData.distances[idx])
+    : pathData.step;
+  const turnRate = Math.abs(arcDiff(p1.theta, p2.theta)) / span;
+  return Math.max(.2, Math.min(1, 1 - turnRate * 7));
 }
 
 function walkDiscretePath(pathData, d) {
@@ -317,9 +355,8 @@ function walkDiscretePath(pathData, d) {
   if(d <= 0) return asPose(segs[0]);
   if(d >= pathData.totalLen) return asPose(segs[segs.length-1]);
 
-  let idx = Math.floor(d / STEP);
-  let t = (d % STEP) / STEP;
-  if (idx >= segs.length - 1) return asPose(segs[segs.length-1]);
+  let {idx, t} = pathSegmentAt(pathData, d);
+  if(idx >= segs.length - 1) return asPose(segs[segs.length-1]);
 
   let p1 = segs[idx], p2 = segs[idx+1];
   return {
@@ -494,7 +531,7 @@ function startAnim(){
 function loop(ts){
   if(!lastT) lastT=ts;
   const dt=Math.min((ts-lastT)/1000,.05); lastT=ts;
-  dist+=SPD*dt;
+  dist+=SPD*pathSpeedFactor(path, dist)*dt;
   
   if(dist>=path.totalLen){dist=path.totalLen; state='done'; document.getElementById('btn-start').disabled=false; document.getElementById('btn-start').textContent="Start Auto-Park";}
   
