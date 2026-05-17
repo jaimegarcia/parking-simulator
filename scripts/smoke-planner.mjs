@@ -56,6 +56,7 @@ const instrumented = script.replace(
     obstacles,
     updateObstacles,
     planPathAStar,
+    planParkingPath,
     setTarget(idx) { targetIdx = idx; obstacles.delete(idx); updateObstacles(); },
     setManeuver(next) { maneuver = next; },
     clearObstacles() { obstacles.clear(); updateObstacles(); },
@@ -85,7 +86,7 @@ for (const scenario of scenarios) {
   api.setTarget(scenario.target);
   api.setManeuver(scenario.maneuver);
   api.setObstacles(scenario.obstacles);
-  const path = api.planPathAStar(scenario.target, scenario.maneuver);
+  const path = api.planParkingPath(scenario.target, scenario.maneuver);
   const target = api.targetPose(api.SPOTS[scenario.target], scenario.maneuver);
   const last = path?.segs.at(-1);
   const finalError = last

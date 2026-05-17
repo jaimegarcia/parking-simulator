@@ -1,14 +1,15 @@
 (function(){
 const CV=document.getElementById('pc');
 const ctx=CV.getContext('2d');
-const CW=500, CH=310;
+const CW=500, CH=265;
 CV.width=CW; CV.height=CH;
 
-const SPOT_W=72, SPOT_H=84, TOP_Y=14;
+const SPOT_W=72, SPOT_H=98, TOP_Y=10;
 const BOT_Y=CH-15-SPOT_H, LANE_TOP=TOP_Y+SPOT_H, LANE_BOT=BOT_Y;
 const LANE_H=LANE_BOT-LANE_TOP, LANE_MID=(LANE_TOP+LANE_BOT)/2;
-const NCOLS=4, MARGIN=64, PITCH=124;
+const NCOLS=4, MARGIN=(CW - (NCOLS - 1) * SPOT_W) / 2, PITCH=SPOT_W;
 const SPOT_CXS=Array.from({length:NCOLS},(_,i)=>MARGIN+i*PITCH);
+const PARKED_CAR_LINE_GAP=12;
 
 const SPOTS=[];
 for(let i=0;i<4;i++) SPOTS.push({idx:i, cx:SPOT_CXS[i], cy:TOP_Y+SPOT_H/2, row:'top'});
@@ -55,7 +56,9 @@ function updateObstacles() {
   SPOTS.forEach(sp => {
     if(obstacles.has(sp.idx) && sp.idx !== targetIdx) {
       let h = sp.row === 'top' ? -Math.PI/2 : Math.PI/2;
-      let ra_y = sp.row === 'top' ? sp.cy + SPOT_H/2 - RA_BACK - 4 : sp.cy - SPOT_H/2 + RA_BACK + 4;
+      let ra_y = sp.row === 'top'
+        ? sp.cy + SPOT_H/2 - RA_BACK - PARKED_CAR_LINE_GAP
+        : sp.cy - SPOT_H/2 + RA_BACK + PARKED_CAR_LINE_GAP;
       obsPolys.push(getCarPoly(sp.cx, ra_y, h));
     }
   });
@@ -130,7 +133,7 @@ function planPathAStar(spotIdx, maneuver) {
   const STEERS = [-MAX_STEER, -MAX_STEER * .48, 0, MAX_STEER * .48, MAX_STEER];
   const GOAL_DIST = 15, GOAL_ANGLE = 0.38;
   const MAX_ITERS = 90000;
-  let wpX = maneuver === 'reverse' ? sp.cx + 58 : sp.cx - 48;
+  let wpX = maneuver === 'reverse' ? sp.cx + PITCH * .38 : sp.cx - PITCH * .38;
   let wpY = sp.row === 'bot' ? LANE_TOP + 24 : LANE_BOT - 24;
 
   while(open.data.length > 0 && iters < MAX_ITERS) {
@@ -265,7 +268,9 @@ function planPathByManeuver(spotIdx, maneuver) {
   const target = targetPose(sp, maneuver);
   const targetHeading = target.theta;
   const rowDir = sp.row === 'bot' ? 1 : -1;
-  const offsets = maneuver === 'reverse' ? [82, 62, 102, 42, 122] : [-70, -48, -92, -28, -114];
+  const offsets = maneuver === 'reverse'
+    ? [PITCH * .62, PITCH * .45, PITCH * .8, PITCH * .3, PITCH]
+    : [-PITCH * .56, -PITCH * .38, -PITCH * .72, -PITCH * .24, -PITCH * .9];
   const sideYs = [LANE_MID, LANE_MID - rowDir * 12, LANE_MID + rowDir * 10, LANE_MID - rowDir * 24];
 
   for(const offset of offsets) {
@@ -292,6 +297,10 @@ function planPathByManeuver(spotIdx, maneuver) {
   }
 
   return null;
+}
+
+function planParkingPath(spotIdx, maneuver) {
+  return planPathByManeuver(spotIdx, maneuver) || planPathAStar(spotIdx, maneuver);
 }
 
 function walkDiscretePath(pathData, d) {
@@ -426,7 +435,9 @@ function drawObstacles(c){
   SPOTS.forEach(sp=>{
     if(!obstacles.has(sp.idx)||sp.idx===targetIdx)return;
     const h=sp.row==='top'?-Math.PI/2:Math.PI/2;
-    const ra_y=sp.row==='top'?sp.cy+SPOT_H/2-RA_BACK-4:sp.cy-SPOT_H/2+RA_BACK+4;
+    const ra_y=sp.row==='top'
+      ? sp.cy+SPOT_H/2-RA_BACK-PARKED_CAR_LINE_GAP
+      : sp.cy-SPOT_H/2+RA_BACK+PARKED_CAR_LINE_GAP;
     drawCar(sp.cx,ra_y,h,0,c.ob,c.obr,c.obg,c);
   });
 }
@@ -465,7 +476,7 @@ function startAnim(){
     car={x:s.x,y:s.y,heading:s.heading,steerAngle:0};
     traj=[]; dist=0; lastT=null;
     
-    path = planPathAStar(targetIdx, maneuver);
+    path = planParkingPath(targetIdx, maneuver);
     
     if(!path) {
       alert("No valid path found! The car is completely blocked by obstacles.");
