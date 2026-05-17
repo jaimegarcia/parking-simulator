@@ -499,6 +499,12 @@ function draw(){
 }
 
 const SPD=100;
+function setSpeedFromControl() {
+  const speedRange = document.getElementById('speed-range');
+  speedScale = speedRange ? parseInt(speedRange.value, 10) : speedScale;
+  updateSpeedControl();
+}
+
 function updateSpeedControl() {
   const speedValue = document.getElementById('speed-value');
   if(speedValue) speedValue.textContent = (speedScale / 100).toFixed(2).replace(/0$/, '') + 'x';
@@ -581,7 +587,8 @@ CV.addEventListener('mousedown', e => {
 
 document.getElementById('sel-spot').onchange=e=>{targetIdx=parseInt(e.target.value); obstacles.delete(targetIdx); if(state!=='running'){path=null;reset();}};
 document.getElementById('sel-man').onchange=e=>{maneuver=e.target.value; if(state!=='running'){path=null;reset();}};
-document.getElementById('speed-range').oninput=e=>{speedScale=parseInt(e.target.value, 10); updateSpeedControl();};
+document.getElementById('speed-range').addEventListener('input', setSpeedFromControl);
+document.getElementById('speed-range').addEventListener('change', setSpeedFromControl);
 document.getElementById('btn-obs').onclick=()=>{
   obstacles.clear();
   SPOTS.forEach(sp=>{ if(sp.idx!==targetIdx&&Math.random()>.5) obstacles.add(sp.idx); });
@@ -590,6 +597,6 @@ document.getElementById('btn-obs').onclick=()=>{
 document.getElementById('btn-start').onclick=startAnim;
 document.getElementById('btn-reset').onclick=reset;
 
-updateSpeedControl();
+setSpeedFromControl();
 reset();
 })();
