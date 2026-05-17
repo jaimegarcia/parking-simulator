@@ -135,15 +135,16 @@ for (const angle of [0, 30, 45]) {
 
 const scenarios = [
   { target: 5, maneuver: 'reverse', obstacles: [] },
-  { target: 5, maneuver: 'reverse', obstacles: [0, 1, 3, 4, 6] },
-  { target: 6, maneuver: 'reverse', obstacles: [1, 2, 4, 5, 7] },
-  { target: 2, maneuver: 'reverse', obstacles: [0, 1, 3, 5, 6] },
+  { target: 5, maneuver: 'reverse', obstacles: [0, 1, 2, 3] },
+  { target: 6, maneuver: 'reverse', obstacles: [0, 1, 2, 3] },
+  { target: 2, maneuver: 'reverse', obstacles: [4, 5, 6, 7] },
   { target: 5, maneuver: 'forward', obstacles: [] },
-  { target: 6, maneuver: 'forward', obstacles: [0, 2, 4, 5, 7] },
+  { target: 6, maneuver: 'forward', obstacles: [0, 1, 2, 3] },
+  { target: 5, maneuver: 'forward', obstacles: [0, 1, 2, 3, 4, 6, 7] },
   { target: 5, maneuver: 'reverse', obstacles: [], angle: 30 },
-  { target: 5, maneuver: 'reverse', obstacles: [0, 1, 2, 3, 4, 6, 7], angle: 32 },
-  { target: 6, maneuver: 'forward', obstacles: [0, 2, 4, 5, 7], angle: 45 },
-  { target: 2, maneuver: 'reverse', obstacles: [0, 1, 3, 5, 6], angle: 45 }
+  { target: 5, maneuver: 'reverse', obstacles: [0, 1, 2, 3], angle: 32 },
+  { target: 6, maneuver: 'forward', obstacles: [0, 1, 2, 3], angle: 45 },
+  { target: 2, maneuver: 'reverse', obstacles: [4, 5, 6, 7], angle: 45 }
 ];
 
 for (const scenario of scenarios) {

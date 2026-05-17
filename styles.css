@@ -48,6 +48,11 @@ select, button { width: 100%; padding: 6px 8px; font-size: 12px; border-radius: 
 button { margin-top: 4px; transition: 0.1s; }
 button:hover { filter: brightness(1.08); }
 button:active { transform: scale(.98); }
+.dimensions { display: grid; gap: 4px; font-size: 11px; }
+.dimensions div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.dimensions div:last-child { border-bottom: 0; }
+.dimensions span { color: var(--color-text-secondary); }
+.dimensions strong { color: var(--color-text-primary); font-size: 12px; font-weight: 500; white-space: nowrap; }
 #btn-start { background: var(--color-background-info); color: var(--color-text-info); border-color: var(--color-border-info); font-weight: 500; }
 #btn-pause.is-paused { background: var(--color-background-info); color: var(--color-text-info); border-color: var(--color-border-info); font-weight: 500; }
 #btn-start:disabled,
@@ -105,4 +110,6 @@ input[type="range"] { width: 100%; accent-color: var(--color-text-info); cursor:
   body { padding: 14px 10px; }
   h1 { align-items: flex-start; flex-direction: column; gap: 4px; }
   #controls { grid-template-columns: 1fr; }
+  .dimensions div { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .dimensions strong { white-space: normal; }
 }

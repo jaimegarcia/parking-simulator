@@ -4,7 +4,8 @@ const ctx=CV.getContext('2d');
 const CW=500, CH=265;
 CV.width=CW; CV.height=CH;
 
-const SPOT_W=72, SPOT_H=98, TOP_Y=10;
+const CAR_LEN=68, CAR_WID=28, WB=46, RA_BACK=12, RA_FRONT=RA_BACK+WB;
+const SPOT_W=CAR_WID * 1.25, SPOT_H=CAR_LEN * 1.25, TOP_Y=10;
 const BOT_Y=CH-15-SPOT_H, LANE_TOP=TOP_Y+SPOT_H, LANE_BOT=BOT_Y;
 const LANE_H=LANE_BOT-LANE_TOP, LANE_MID=(LANE_TOP+LANE_BOT)/2;
 const NCOLS=4, BASE_PITCH=SPOT_W;
@@ -14,10 +15,11 @@ const SPOTS=[];
 for(let i=0;i<4;i++) SPOTS.push({idx:i, col:i, cy:TOP_Y+SPOT_H/2, row:'top'});
 for(let i=0;i<4;i++) SPOTS.push({idx:4+i, col:i, cy:BOT_Y+SPOT_H/2, row:'bot'});
 
-const CAR_LEN=68, CAR_WID=28, WB=46, RA_BACK=12, RA_FRONT=RA_BACK+WB;
 const WW=5, WH=12;
 const STEERING_WHEEL_RATIO=14;
 const MAX_STEERING_WHEEL_TURN=540;
+const METERS_PER_UNIT=4.7 / CAR_LEN;
+const FEET_PER_METER=3.28084;
 
 let car={x:0,y:0,heading:0,steerAngle:0};
 let traj=[], path=null, dist=0, state='idle';
@@ -170,7 +172,9 @@ function arcDiff(a, b) {
 
 function targetPose(sp, maneuver) {
   const reverse = maneuver === 'reverse';
-  const distance = reverse ? SPOT_H - RA_BACK - 8 : RA_BACK + 8;
+  const distance = reverse
+    ? (RA_FRONT + SPOT_H - RA_BACK) / 2
+    : (RA_BACK + SPOT_H - RA_FRONT) / 2;
   const pos = pointFromSpotAisle(sp, distance);
   const inward = spotInwardTheta(sp);
   return {
@@ -193,10 +197,12 @@ function planPathAStar(spotIdx, maneuver) {
   open.push({x: s.x, y: s.y, theta: s.heading, g: 0, f: 0, gear: 1, steer: 0, parent: null});
 
   let best = null, nearest = null, nearestScore = Infinity, iters = 0;
-  const STEP = 7, MAX_STEER = 0.64;
-  const STEERS = [-MAX_STEER, -MAX_STEER * .48, 0, MAX_STEER * .48, MAX_STEER];
-  const GOAL_DIST = 15, GOAL_ANGLE = 0.38;
-  const MAX_ITERS = 90000;
+  const STEP = maneuver === 'forward' ? 4 : 7, MAX_STEER = 0.64;
+  const STEERS = maneuver === 'forward'
+    ? [-MAX_STEER, -MAX_STEER * .72, -MAX_STEER * .42, 0, MAX_STEER * .42, MAX_STEER * .72, MAX_STEER]
+    : [-MAX_STEER, -MAX_STEER * .48, 0, MAX_STEER * .48, MAX_STEER];
+  const GOAL_DIST = maneuver === 'forward' ? 10 : 15, GOAL_ANGLE = maneuver === 'forward' ? 0.24 : 0.38;
+  const MAX_ITERS = maneuver === 'forward' ? 180000 : 90000;
   const pitch = spotPitch();
   const spotX = spotAislePoint(sp).x;
   let wpX = maneuver === 'reverse' ? spotX + pitch * .38 : spotX - pitch * .38;
@@ -235,7 +241,7 @@ function planPathAStar(spotIdx, maneuver) {
         if(coll) continue;
 
         let cost = curr.g + STEP;
-        if(gear !== curr.gear) cost += 90;
+        if(gear !== curr.gear) cost += maneuver === 'forward' ? 36 : 90;
         if(steer !== 0) cost += Math.abs(steer) * 4;
 
         let f = cost;
@@ -254,7 +260,7 @@ function planPathAStar(spotIdx, maneuver) {
           else f += ndT * 1.1;
           if (ndT < 78) {
             f += nAD * 78;
-            if (gear === -1) f += 420; 
+            if (gear === -1) f += 80; 
           }
         }
         open.push({x: nx, y: ny, theta: ntheta, g: cost, f: f, gear: gear, steer: steer, parent: curr});
@@ -613,6 +619,22 @@ function updateAngleControl() {
   if(angleValue) angleValue.textContent = `${parkingAngleDeg}°`;
 }
 
+function updateDimensions() {
+  const carDim = document.getElementById('dim-car');
+  const spotDim = document.getElementById('dim-spot');
+  const lotDim = document.getElementById('dim-lot');
+  const fmt = (length, width) => {
+    const lM = length * METERS_PER_UNIT;
+    const wM = width * METERS_PER_UNIT;
+    const lFt = lM * FEET_PER_METER;
+    const wFt = wM * FEET_PER_METER;
+    return `${lM.toFixed(1)} x ${wM.toFixed(1)} m / ${lFt.toFixed(1)} x ${wFt.toFixed(1)} ft`;
+  };
+  if(carDim) carDim.textContent = fmt(CAR_LEN, CAR_WID);
+  if(spotDim) spotDim.textContent = fmt(SPOT_H, SPOT_W);
+  if(lotDim) lotDim.textContent = fmt(CW, CH);
+}
+
 function updateActionControls() {
   const isActive = state === 'running' || state === 'paused' || state === 'planning';
   const isPaused = state === 'paused';
@@ -754,6 +776,7 @@ document.getElementById('btn-pause').onclick=togglePause;
 document.getElementById('btn-reset').onclick=reset;
 
 updateAngleControl();
+updateDimensions();
 setSpeedFromControl();
 reset();
 })();
