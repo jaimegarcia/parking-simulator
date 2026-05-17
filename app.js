@@ -523,6 +523,150 @@ function drawPathPreview(c){
   ctx.beginPath(); ctx.moveTo(path.segs[0].x, path.segs[0].y);
   for(let i=1; i<path.segs.length; i++) ctx.lineTo(path.segs[i].x, path.segs[i].y);
   ctx.stroke(); ctx.restore();
+  drawTurnRuler(path, c);
+}
+
+function firstTurnDistance(pathData) {
+  const segs = pathData.segs;
+  const distances = pathData.distances;
+  const startHeading = segs[0].theta;
+  for(let i = 1; i < segs.length; i++) {
+    const headingChange = Math.abs(arcDiff(segs[i - 1].theta, segs[i].theta));
+    const totalHeadingChange = Math.abs(arcDiff(startHeading, segs[i].theta));
+    const steeringChange = Math.abs(segs[i].steer || 0);
+    if(headingChange > .018 || totalHeadingChange > .055 || steeringChange > .08) {
+      return distances ? distances[i] : i * pathData.step;
+    }
+  }
+  return pathData.totalLen;
+}
+
+function reverseShiftDistance(pathData) {
+  const segs = pathData.segs;
+  const distances = pathData.distances;
+  for(let i = 1; i < segs.length; i++) {
+    if(segs[i - 1].gear === 1 && segs[i].gear === -1) {
+      return distances ? distances[i] : i * pathData.step;
+    }
+  }
+  return firstTurnDistance(pathData);
+}
+
+function pathPointAt(pathData, distance) {
+  const pose = walkDiscretePath(pathData, distance);
+  return {x: pose.x, y: pose.y, heading: pose.heading};
+}
+
+function vehiclePoint(pose, forwardDistance) {
+  return {
+    x: pose.x + Math.cos(pose.heading) * forwardDistance,
+    y: pose.y + Math.sin(pose.heading) * forwardDistance
+  };
+}
+
+function vehicleOffsetPoint(pose, forwardDistance, lateralDistance) {
+  const fwdX = Math.cos(pose.heading), fwdY = Math.sin(pose.heading);
+  const rightX = -fwdY, rightY = fwdX;
+  return {
+    x: pose.x + fwdX * forwardDistance + rightX * lateralDistance,
+    y: pose.y + fwdY * forwardDistance + rightY * lateralDistance
+  };
+}
+
+function drawTick(point, heading, size) {
+  const nx = -Math.sin(heading), ny = Math.cos(heading);
+  ctx.beginPath();
+  ctx.moveTo(point.x - nx * size, point.y - ny * size);
+  ctx.lineTo(point.x + nx * size, point.y + ny * size);
+  ctx.stroke();
+}
+
+function drawTurnRuler(pathData, c) {
+  const isReverseParking = maneuver === 'reverse';
+  const eventDistance = Math.min(isReverseParking ? reverseShiftDistance(pathData) : firstTurnDistance(pathData), pathData.totalLen);
+  if(eventDistance < .5) return;
+
+  const targetSpot = SPOTS[targetIdx];
+  const spotRef = spotAislePoint(targetSpot);
+  const eventPose = pathPointAt(pathData, eventDistance);
+  const referencePoint = vehicleOffsetPoint(eventPose, RA_FRONT - WB * .42, -CAR_WID * .34);
+  const dx = referencePoint.x - spotRef.x;
+  const dy = referencePoint.y - spotRef.y;
+  const absX = Math.abs(dx), absY = Math.abs(dy);
+  if(absX < .5 && absY < .5) return;
+
+  const tickStep = 1 / METERS_PER_UNIT;
+  const corner = {x: referencePoint.x, y: spotRef.y};
+  const axisHeading = (from, to) => Math.atan2(to.y - from.y, to.x - from.x);
+  const pointOnAxis = (from, to, distance) => {
+    const len = Math.hypot(to.x - from.x, to.y - from.y);
+    const t = len > 0 ? distance / len : 0;
+    return {x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t};
+  };
+  const labelBox = (lines, x, y) => {
+    const padX = 7, padY = 5, lineH = 12;
+    const labelW = Math.max(...lines.map(line => ctx.measureText(line).width)) + padX * 2;
+    const labelH = lines.length * lineH + padY * 2;
+    const labelX = Math.max(labelW / 2 + 4, Math.min(CW - labelW / 2 - 4, x));
+    const labelY = Math.max(labelH / 2 + 4, Math.min(CH - labelH / 2 - 4, y));
+    rr(labelX - labelW / 2, labelY - labelH / 2, labelW, labelH, 5);
+    ctx.fillStyle = dk() ? 'rgba(12,24,38,.96)' : 'rgba(236,247,255,.97)';
+    ctx.fill();
+    ctx.strokeStyle = c.tx;
+    ctx.lineWidth = .8;
+    ctx.stroke();
+    ctx.fillStyle = c.tx;
+    lines.forEach((line, idx) => {
+      ctx.fillText(line, labelX, labelY - (lines.length - 1) * lineH / 2 + idx * lineH);
+    });
+  };
+
+  ctx.save();
+  ctx.strokeStyle = c.tx;
+  ctx.fillStyle = c.tx;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([]);
+
+  ctx.beginPath();
+  ctx.moveTo(spotRef.x, spotRef.y);
+  ctx.lineTo(corner.x, corner.y);
+  ctx.lineTo(referencePoint.x, referencePoint.y);
+  ctx.stroke();
+
+  ctx.fillStyle = c.tx;
+  ctx.beginPath();
+  ctx.arc(referencePoint.x, referencePoint.y, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  if(absX >= .5) {
+    const hHeading = axisHeading(spotRef, corner);
+    drawTick(spotRef, hHeading, 5);
+    for(let d = tickStep; d < absX; d += tickStep) {
+      drawTick(pointOnAxis(spotRef, corner, d), hHeading, 3.5);
+    }
+    drawTick(corner, hHeading, absY >= .5 ? 4 : 5);
+  }
+  if(absY >= .5) {
+    const vHeading = axisHeading(corner, referencePoint);
+    drawTick(corner, vHeading, absX >= .5 ? 4 : 5);
+    for(let d = tickStep; d < absY; d += tickStep) {
+      drawTick(pointOnAxis(corner, referencePoint, d), vHeading, 3.5);
+    }
+    drawTick(referencePoint, vHeading, 5);
+  }
+
+  ctx.font = '500 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const alongLabel = `${(absX * METERS_PER_UNIT).toFixed(1)} m ${dx >= 0 ? 'right' : 'left'} of center`;
+  const outLabel = `${(absY * METERS_PER_UNIT).toFixed(1)} m into aisle`;
+  const eventLabel = isReverseParking ? 'shift reverse' : 'start turn';
+  const pointLabel = 'driver window at marker';
+  const lotMargin = (CW - NCOLS * spotPitch()) / 2;
+  const labelAnchorY = targetSpot.row === 'bot' ? BOT_Y + SPOT_H * .5 : TOP_Y + SPOT_H * .5;
+  const labelAnchorX = spotRef.x < CW / 2 ? CW - lotMargin / 2 : lotMargin / 2;
+  labelBox([eventLabel, 'from spot centerline', pointLabel, alongLabel, outLabel], labelAnchorX, labelAnchorY);
+  ctx.restore();
 }
 
 function drawTraj(c){
