@@ -23,7 +23,7 @@ let traj=[], path=null, dist=0, state='idle';
 let raf=null, lastT=null;
 let targetIdx=5, maneuver='reverse';
 let obstacles=new Set(), obsPolys=[];
-let speedScale=1;
+let speedScale=100;
 
 function startPos(){ return {x:30, y:LANE_MID, heading:0}; }
 
@@ -501,7 +501,7 @@ function draw(){
 const SPD=100;
 function updateSpeedControl() {
   const speedValue = document.getElementById('speed-value');
-  if(speedValue) speedValue.textContent = speedScale.toFixed(2).replace(/0$/, '') + 'x';
+  if(speedValue) speedValue.textContent = (speedScale / 100).toFixed(2).replace(/0$/, '') + 'x';
 }
 
 function reset(){
@@ -540,7 +540,7 @@ function startAnim(){
 function loop(ts){
   if(!lastT) lastT=ts;
   const dt=Math.min((ts-lastT)/1000,.05); lastT=ts;
-  dist+=SPD*speedScale*pathSpeedFactor(path, dist)*dt;
+  dist+=SPD*(speedScale / 100)*pathSpeedFactor(path, dist)*dt;
   
   if(dist>=path.totalLen){dist=path.totalLen; state='done'; document.getElementById('btn-start').disabled=false; document.getElementById('btn-start').textContent="Start Auto-Park";}
   
@@ -581,7 +581,7 @@ CV.addEventListener('mousedown', e => {
 
 document.getElementById('sel-spot').onchange=e=>{targetIdx=parseInt(e.target.value); obstacles.delete(targetIdx); if(state!=='running'){path=null;reset();}};
 document.getElementById('sel-man').onchange=e=>{maneuver=e.target.value; if(state!=='running'){path=null;reset();}};
-document.getElementById('speed-range').oninput=e=>{speedScale=parseFloat(e.target.value); updateSpeedControl();};
+document.getElementById('speed-range').oninput=e=>{speedScale=parseInt(e.target.value, 10); updateSpeedControl();};
 document.getElementById('btn-obs').onclick=()=>{
   obstacles.clear();
   SPOTS.forEach(sp=>{ if(sp.idx!==targetIdx&&Math.random()>.5) obstacles.add(sp.idx); });
