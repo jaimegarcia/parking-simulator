@@ -1,12 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
-
-if (!script) {
-  throw new Error('Could not find simulator script in index.html');
-}
+const script = await readFile(new URL('../app.js', import.meta.url), 'utf8');
 
 function noop() {}
 const ctx = {
