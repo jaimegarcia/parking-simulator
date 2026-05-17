@@ -1,0 +1,10 @@
+{
+  "name": "parking-simulator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A 2D smart adaptive AI parking simulator.",
+  "scripts": {
+    "start": "python3 -m http.server 4173",
+    "test": "node scripts/smoke-planner.mjs"
+  }
+}
