@@ -61,6 +61,44 @@ input[type="range"]:disabled { opacity: .4; cursor: not-allowed; }
 input[type="range"] { width: 100%; accent-color: var(--color-text-info); cursor: pointer; }
 #stats { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 .st { flex: 1; min-width: 70px; background: var(--color-background-primary); border-radius: var(--border-radius-md); padding: 7px 10px; border: 0.5px solid var(--color-border-tertiary); }
+.steering-st { display: flex; align-items: center; gap: 9px; min-width: 118px; }
+.steering-wheel {
+  --steer-turn: 0deg;
+  position: relative;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border: 3px solid var(--color-text-info);
+  border-radius: 50%;
+  color: var(--color-text-info);
+  opacity: .78;
+  transform: rotate(var(--steer-turn));
+  transition: transform .12s linear, opacity .15s ease;
+}
+.steering-wheel.is-active { opacity: 1; }
+.wheel-hub {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  left: 50%;
+  top: 50%;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.wheel-spoke {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: 50% 0;
+}
+.wheel-spoke-top { transform: rotate(0deg) translate(-50%, -3px); }
+.wheel-spoke-left { transform: rotate(126deg) translate(-50%, -3px); }
+.wheel-spoke-right { transform: rotate(234deg) translate(-50%, -3px); }
 .sv { font-size: 15px; font-weight: 500; color: var(--color-text-primary); }
 .sl { font-size: 10px; color: var(--color-text-secondary); margin-top: 1px; }
 @media (max-width: 560px) {

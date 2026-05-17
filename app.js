@@ -16,6 +16,8 @@ for(let i=0;i<4;i++) SPOTS.push({idx:4+i, col:i, cy:BOT_Y+SPOT_H/2, row:'bot'});
 
 const CAR_LEN=68, CAR_WID=28, WB=46, RA_BACK=12, RA_FRONT=RA_BACK+WB;
 const WW=5, WH=12;
+const STEERING_WHEEL_RATIO=14;
+const MAX_STEERING_WHEEL_TURN=540;
 
 let car={x:0,y:0,heading:0,steerAngle:0};
 let traj=[], path=null, dist=0, state='idle';
@@ -707,8 +709,15 @@ function loop(ts){
 }
 
 function updateStats(pose){
+  const tireSteerDeg=pose?Math.round((car.steerAngle||0)*180/Math.PI):0;
+  const wheelSteerDeg=Math.max(-MAX_STEERING_WHEEL_TURN, Math.min(MAX_STEERING_WHEEL_TURN, Math.round(tireSteerDeg * STEERING_WHEEL_RATIO)));
+  const wheel=document.getElementById('steering-wheel');
+  if(wheel && wheel.style) {
+    wheel.style.setProperty('--steer-turn', `${wheelSteerDeg}deg`);
+    if(wheel.classList) wheel.classList.toggle('is-active', state === 'running' || state === 'paused');
+  }
   document.getElementById('s-dir').textContent=pose?(pose.rev?'REV':'FWD'):'—';
-  document.getElementById('s-steer').textContent=pose?Math.round((car.steerAngle||0)*180/Math.PI)+'°':'0°';
+  document.getElementById('s-steer').textContent=wheelSteerDeg+'°';
   document.getElementById('s-head').textContent=Math.round(((car.heading||0)*180/Math.PI+360+90)%360)+'°';
   document.getElementById('s-seg').textContent=pose?pose.label:'—';
   document.getElementById('s-prog').textContent=path?Math.min(100, Math.round(dist/path.totalLen*100))+'%':'0%';

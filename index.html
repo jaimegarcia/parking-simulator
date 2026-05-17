@@ -49,7 +49,18 @@
     </div>
     <div id="stats">
       <div class="st"><div class="sv" id="s-dir">FWD</div><div class="sl">Direction</div></div>
-      <div class="st"><div class="sv" id="s-steer">0°</div><div class="sl">Steer</div></div>
+      <div class="st steering-st">
+        <div class="steering-wheel" id="steering-wheel" aria-hidden="true">
+          <span class="wheel-hub"></span>
+          <span class="wheel-spoke wheel-spoke-top"></span>
+          <span class="wheel-spoke wheel-spoke-left"></span>
+          <span class="wheel-spoke wheel-spoke-right"></span>
+        </div>
+        <div>
+          <div class="sv" id="s-steer">0°</div>
+          <div class="sl">Wheel</div>
+        </div>
+      </div>
       <div class="st"><div class="sv" id="s-head">90°</div><div class="sl">Heading</div></div>
       <div class="st"><div class="sv" id="s-seg">—</div><div class="sl">Segment</div></div>
       <div class="st"><div class="sv" id="s-prog">0%</div><div class="sl">Progress</div></div>
