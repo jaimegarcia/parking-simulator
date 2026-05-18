@@ -613,26 +613,47 @@ function planForwardDirect(sp, target) {
   const pitch = spotPitch();
   const spotRef = spotAislePoint(sp);
   const targetHeading = target.theta;
-  const wideYs = [laneFarFromSpotY(sp), LANE_MID - rowDir * 16, LANE_MID - rowDir * 24];
-  const alignXs = [spotRef.x - pitch * 1.18, spotRef.x - pitch, spotRef.x - pitch * 1.42, spotRef.x - pitch * .78];
+  const wideYs = [laneFarFromSpotY(sp), LANE_MID - rowDir * 16, LANE_MID - rowDir * 24, LANE_MID + rowDir * 4];
+  const alignXs = [spotRef.x - pitch * 1.18, spotRef.x - pitch, spotRef.x - pitch * 1.42, spotRef.x - pitch * .78, spotRef.x - pitch * .55];
+  const squareOffsets = [36, 44, 28, 52];
+  const turnHandlesA = [96, 112, 128, 78];
+  const turnHandlesB = [28, 38, 48];
+  let best = null;
+  let bestScore = Infinity;
 
   for(const alignX of alignXs) {
     for(const y of wideYs) {
-      const align = {x: Math.max(34, Math.min(CW - 34, alignX)), y};
-      let segs = buildCurve(start, align, 0, 0, 1, 'Wide approach', Math.max(12, align.x - start.x), 24, 26);
-      const turnIn = applyPhaseLabels(
-        buildCurve(align, target, 0, targetHeading, 1, 'Full-right turn', 112, 46, 82),
-        [
-          {until: .68, label: 'Full-right turn'},
-          {until: 1, label: 'Square up'}
-        ]
-      );
-      segs = appendCurve(segs, turnIn);
-      const path = tryVideoPath(segs);
-      if(path) return path;
+      for(const squareOffset of squareOffsets) {
+        for(const turnHandleA of turnHandlesA) {
+          for(const turnHandleB of turnHandlesB) {
+            const align = {x: Math.max(34, Math.min(CW - 34, alignX)), y};
+            const squareStart = {
+              x: target.x - Math.cos(targetHeading) * squareOffset,
+              y: target.y - Math.sin(targetHeading) * squareOffset,
+              theta: targetHeading
+            };
+            let segs = buildCurve(start, align, 0, 0, 1, 'Wide approach', Math.max(12, align.x - start.x), 24, 28);
+            const turnIn = buildCurve(align, squareStart, 0, targetHeading, 1, 'Full-right turn', turnHandleA, turnHandleB, 72);
+            segs = appendCurve(segs, turnIn);
+            appendStraightToPoint(segs, target, 1, 'Square up', 3.2);
+            const path = tryVideoPath(segs);
+            if(path) {
+              const score = pathSmoothnessScore(path)
+                + Math.abs(align.x - (spotRef.x - pitch)) * .35
+                + Math.abs(squareOffset - 40) * .45
+                + Math.abs(turnHandleA - 112) * .08
+                + Math.abs(turnHandleB - 38) * .14;
+              if(score < bestScore) {
+                best = path;
+                bestScore = score;
+              }
+            }
+          }
+        }
+      }
     }
   }
-  return null;
+  return best;
 }
 
 function planReverseAngled(sp, target) {
