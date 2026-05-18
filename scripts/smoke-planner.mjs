@@ -58,7 +58,7 @@ const instrumented = script.replace(
     planPathAStar,
     planParkingPath,
     setTarget(idx) { targetIdx = idx; obstacles.delete(idx); updateObstacles(); },
-    setManeuver(next) { maneuver = next; },
+    setManeuver(next) { maneuver = normalizeManeuver(next); },
     setParkingAngle(deg) { parkingAngleDeg = deg; updateObstacles(); },
     clearObstacles() { obstacles.clear(); updateObstacles(); },
     setObstacles(ids) { obstacles.clear(); ids.forEach(id => { if (id !== targetIdx) obstacles.add(id); }); updateObstacles(); },
@@ -76,6 +76,7 @@ vm.runInContext(instrumented, sandbox, { filename: 'index.html' });
 const api = sandbox.__parkingTest;
 const failures = [];
 const overlapFailures = [];
+const phaseFailures = [];
 
 function cross(a, b, c) {
   return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
@@ -133,18 +134,35 @@ for (const angle of [0, 30, 45]) {
   }
 }
 
+api.setParkingAngle(35);
+const topPoly = api.spotPolygon(api.SPOTS[0]);
+if (!(topPoly[2].x < topPoly[1].x && topPoly[3].x < topPoly[0].x)) {
+  overlapFailures.push({ angle: 35, spot: 0, reason: 'top angled spots should lean left from the aisle' });
+}
+const bottomPoly = api.spotPolygon(api.SPOTS[4]);
+if (!(bottomPoly[2].x < bottomPoly[1].x && bottomPoly[3].x < bottomPoly[0].x)) {
+  overlapFailures.push({ angle: 35, spot: 4, reason: 'bottom angled spots should lean left from the aisle' });
+}
+
 const scenarios = [
+  { target: 5, maneuver: 'reverse-direct', obstacles: [] },
+  { target: 5, maneuver: 'reverse-direct', obstacles: [0, 1, 2, 3] },
+  { target: 5, maneuver: 'reverse-direct', obstacles: [4, 6] },
+  { target: 5, maneuver: 'reverse-direct', obstacles: [1, 2, 4, 6] },
+  { target: 6, maneuver: 'reverse-direct', obstacles: [0, 1, 2, 3] },
+  { target: 2, maneuver: 'reverse-direct', obstacles: [4, 5, 6, 7] },
+  { target: 5, maneuver: 'forward-direct', obstacles: [] },
+  { target: 6, maneuver: 'forward-direct', obstacles: [0, 1, 2, 3] },
+  { target: 5, maneuver: 'forward-direct', obstacles: [0, 1, 2, 3, 4, 6, 7] },
+  { target: 5, maneuver: 'reverse-angled', obstacles: [], angle: 30 },
+  { target: 5, maneuver: 'reverse-angled', obstacles: [0, 1, 2, 3], angle: 32 },
+  { target: 5, maneuver: 'reverse-angled', obstacles: [4, 6], angle: 45 },
+  { target: 5, maneuver: 'forward-angled', obstacles: [4, 6], angle: 45 },
+  { target: 5, maneuver: 'forward-angled', obstacles: [1, 2, 4, 6], angle: 45 },
+  { target: 6, maneuver: 'forward-angled', obstacles: [0, 1, 2, 3], angle: 45 },
+  { target: 2, maneuver: 'reverse-angled', obstacles: [4, 5, 6, 7], angle: 45 },
   { target: 5, maneuver: 'reverse', obstacles: [] },
-  { target: 5, maneuver: 'reverse', obstacles: [0, 1, 2, 3] },
-  { target: 6, maneuver: 'reverse', obstacles: [0, 1, 2, 3] },
-  { target: 2, maneuver: 'reverse', obstacles: [4, 5, 6, 7] },
-  { target: 5, maneuver: 'forward', obstacles: [] },
-  { target: 6, maneuver: 'forward', obstacles: [0, 1, 2, 3] },
-  { target: 5, maneuver: 'forward', obstacles: [0, 1, 2, 3, 4, 6, 7] },
-  { target: 5, maneuver: 'reverse', obstacles: [], angle: 30 },
-  { target: 5, maneuver: 'reverse', obstacles: [0, 1, 2, 3], angle: 32 },
-  { target: 6, maneuver: 'forward', obstacles: [0, 1, 2, 3], angle: 45 },
-  { target: 2, maneuver: 'reverse', obstacles: [4, 5, 6, 7], angle: 45 }
+  { target: 5, maneuver: 'forward', obstacles: [] }
 ];
 
 for (const scenario of scenarios) {
@@ -165,6 +183,41 @@ for (const scenario of scenarios) {
   }
 }
 
+const expectedPhases = [
+  { target: 5, maneuver: 'reverse-direct', angle: 0, labels: ['Go forward', 'Left-forward', 'Right-reverse align', 'Straight reverse'] },
+  { target: 5, maneuver: 'forward-direct', angle: 0, labels: ['Wide approach', 'Full-right turn', 'Square up'] },
+  { target: 5, maneuver: 'reverse-angled', angle: 35, labels: ['Signal and pass space', 'Stop just past space', 'Reverse into angle', 'Straight reverse'] },
+  { target: 5, maneuver: 'forward-angled', angle: 35, labels: ['Bumper to line', 'Full-right turn', 'Straighten ahead'] }
+];
+
+for (const scenario of expectedPhases) {
+  api.setParkingAngle(scenario.angle);
+  api.setTarget(scenario.target);
+  api.setManeuver(scenario.maneuver);
+  api.clearObstacles();
+  const path = api.planParkingPath(scenario.target, scenario.maneuver);
+  const labels = [...new Set(path?.segs.map(seg => seg.label).filter(Boolean))];
+  const missing = scenario.labels.filter(label => !labels.includes(label));
+  if (missing.length) phaseFailures.push({ ...scenario, labels, missing });
+  const maxHeadingStep = path?.segs.slice(1).reduce((max, seg, idx) => {
+    const prev = path.segs[idx];
+    return Math.max(max, Math.abs(Math.atan2(Math.sin(seg.theta - prev.theta), Math.cos(seg.theta - prev.theta))));
+  }, 0) ?? Infinity;
+  if (maxHeadingStep > 0.28) phaseFailures.push({ ...scenario, reason: 'heading changes too abruptly', maxHeadingStep });
+  if (scenario.maneuver === 'reverse-direct' || scenario.maneuver === 'reverse-angled') {
+    const straight = path?.segs.filter(seg => seg.label === 'Straight reverse') || [];
+    const maxSteer = straight.reduce((max, seg) => Math.max(max, Math.abs(seg.steer || 0)), 0);
+    if (maxSteer > 0.02) phaseFailures.push({ ...scenario, reason: 'straight reverse final leg steers', maxSteer });
+    const firstStraightIdx = path?.segs.findIndex(seg => seg.label === 'Straight reverse') ?? -1;
+    const handoff = firstStraightIdx > 0 ? path.segs[firstStraightIdx - 1] : null;
+    const target = api.targetPose(api.SPOTS[scenario.target], scenario.maneuver);
+    const handoffAngle = handoff
+      ? Math.abs(Math.atan2(Math.sin(handoff.theta - target.theta), Math.cos(handoff.theta - target.theta)))
+      : Infinity;
+    if (handoffAngle > 0.18) phaseFailures.push({ ...scenario, reason: 'straight reverse starts before car is parallel', handoffAngle });
+  }
+}
+
 if (failures.length) {
   console.error('Planner failed scenarios:', JSON.stringify(failures, null, 2));
   process.exit(1);
@@ -172,6 +225,11 @@ if (failures.length) {
 
 if (overlapFailures.length) {
   console.error('Spot overlap failures:', JSON.stringify(overlapFailures, null, 2));
+  process.exit(1);
+}
+
+if (phaseFailures.length) {
+  console.error('Video phase failures:', JSON.stringify(phaseFailures, null, 2));
   process.exit(1);
 }
 
