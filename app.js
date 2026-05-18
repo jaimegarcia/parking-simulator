@@ -24,10 +24,49 @@ const FEET_PER_METER=3.28084;
 let car={x:0,y:0,heading:0,steerAngle:0};
 let traj=[], path=null, dist=0, state='idle';
 let raf=null, lastT=null;
-let targetIdx=5, maneuver='reverse';
+let targetIdx=5, maneuver='reverse-direct';
 let obstacles=new Set(), obsPolys=[];
 let speedScale=100;
 let parkingAngleDeg=0;
+
+const MANEUVER_INFO = {
+  'reverse-direct': {
+    reverse: true,
+    angled: false,
+    cue: 'Mirror to boundary, swing left until the corner shows, then reverse right and straighten.'
+  },
+  'forward-direct': {
+    reverse: false,
+    angled: false,
+    cue: 'Stay wide, mirror to adjacent headlight, turn right, then square up in the space.'
+  },
+  'reverse-angled': {
+    reverse: true,
+    angled: true,
+    defaultAngle: 35,
+    cue: 'Signal, pass the space, stop just beyond it, then reverse-turn into the angle and straighten.'
+  },
+  'forward-angled': {
+    reverse: false,
+    angled: true,
+    defaultAngle: 35,
+    cue: 'Stay wide, bumper to the near line, turn into the angled bay, then straighten ahead.'
+  }
+};
+
+function normalizeManeuver(value) {
+  if(value === 'reverse') return 'reverse-direct';
+  if(value === 'forward') return 'forward-direct';
+  return MANEUVER_INFO[value] ? value : 'reverse-direct';
+}
+
+function maneuverInfo(value = maneuver) {
+  return MANEUVER_INFO[normalizeManeuver(value)];
+}
+
+function isReverseManeuver(value = maneuver) {
+  return maneuverInfo(value).reverse;
+}
 
 function startPos(){ return {x:30, y:LANE_MID, heading:0}; }
 
@@ -40,7 +79,8 @@ function parkingAngleRad() {
 }
 
 function spotPitch() {
-  return BASE_PITCH;
+  const cos = Math.cos(parkingAngleRad());
+  return BASE_PITCH / Math.max(.7, cos);
 }
 
 function spotMouthLeftX(sp) {
@@ -51,7 +91,7 @@ function spotMouthLeftX(sp) {
 
 function spotInwardTheta(sp) {
   const a = parkingAngleRad();
-  return sp.row === 'top' ? -Math.PI / 2 + a : Math.PI / 2 - a;
+  return sp.row === 'top' ? -Math.PI / 2 - a : Math.PI / 2 + a;
 }
 
 function spotAislePoint(sp) {
@@ -171,7 +211,7 @@ function arcDiff(a, b) {
 }
 
 function targetPose(sp, maneuver) {
-  const reverse = maneuver === 'reverse';
+  const reverse = isReverseManeuver(maneuver);
   const distance = reverse
     ? (RA_FRONT + SPOT_H - RA_BACK) / 2
     : (RA_BACK + SPOT_H - RA_FRONT) / 2;
@@ -186,6 +226,7 @@ function targetPose(sp, maneuver) {
 
 function planPathAStar(spotIdx, maneuver) {
   const sp = SPOTS[spotIdx];
+  const reverse = isReverseManeuver(maneuver);
   const target = targetPose(sp, maneuver);
   const tX = target.x;
   const tY = target.y;
@@ -197,15 +238,15 @@ function planPathAStar(spotIdx, maneuver) {
   open.push({x: s.x, y: s.y, theta: s.heading, g: 0, f: 0, gear: 1, steer: 0, parent: null});
 
   let best = null, nearest = null, nearestScore = Infinity, iters = 0;
-  const STEP = maneuver === 'forward' ? 4 : 7, MAX_STEER = 0.64;
-  const STEERS = maneuver === 'forward'
-    ? [-MAX_STEER, -MAX_STEER * .72, -MAX_STEER * .42, 0, MAX_STEER * .42, MAX_STEER * .72, MAX_STEER]
-    : [-MAX_STEER, -MAX_STEER * .48, 0, MAX_STEER * .48, MAX_STEER];
-  const GOAL_DIST = maneuver === 'forward' ? 10 : 15, GOAL_ANGLE = maneuver === 'forward' ? 0.24 : 0.38;
-  const MAX_ITERS = maneuver === 'forward' ? 180000 : 90000;
+  const STEP = reverse ? 7 : 4, MAX_STEER = 0.64;
+  const STEERS = reverse
+    ? [-MAX_STEER, -MAX_STEER * .48, 0, MAX_STEER * .48, MAX_STEER]
+    : [-MAX_STEER, -MAX_STEER * .72, -MAX_STEER * .42, 0, MAX_STEER * .42, MAX_STEER * .72, MAX_STEER];
+  const GOAL_DIST = reverse ? 15 : 10, GOAL_ANGLE = reverse ? 0.38 : 0.24;
+  const MAX_ITERS = reverse ? 90000 : 180000;
   const pitch = spotPitch();
   const spotX = spotAislePoint(sp).x;
-  let wpX = maneuver === 'reverse' ? spotX + pitch * .38 : spotX - pitch * .38;
+  let wpX = reverse ? spotX + pitch * .38 : spotX - pitch * .38;
   let wpY = sp.row === 'bot' ? LANE_TOP + 24 : LANE_BOT - 24;
 
   while(open.data.length > 0 && iters < MAX_ITERS) {
@@ -241,14 +282,14 @@ function planPathAStar(spotIdx, maneuver) {
         if(coll) continue;
 
         let cost = curr.g + STEP;
-        if(gear !== curr.gear) cost += maneuver === 'forward' ? 36 : 90;
+        if(gear !== curr.gear) cost += reverse ? 90 : 36;
         if(steer !== 0) cost += Math.abs(steer) * 4;
 
         let f = cost;
         let ndT = Math.hypot(tX - nx, tY - ny);
         let nAD = Math.abs(arcDiff(ntheta, tTheta));
 
-        if (maneuver === 'reverse') {
+        if (reverse) {
           if (curr.gear === 1 && nx < wpX - 8) f += Math.hypot(wpX - nx, LANE_MID - ny) + Math.hypot(tX - wpX, tY - LANE_MID);
           else f += ndT * 1.15;
           if (ndT < 86) {
@@ -348,46 +389,287 @@ function finalizePath(segs, fallbackStep) {
   };
 }
 
-function planPathByManeuver(spotIdx, maneuver) {
-  const sp = SPOTS[spotIdx];
+function appendCurve(segs, curve) {
+  if(!segs.length) return curve.slice();
+  return segs.concat(curve.slice(1));
+}
+
+function applyPhaseLabels(curve, phases) {
+  const last = Math.max(1, curve.length - 1);
+  curve.forEach((point, idx) => {
+    const t = idx / last;
+    const phase = phases.find(item => t <= item.until) || phases[phases.length - 1];
+    point.label = phase.label;
+  });
+  return curve;
+}
+
+function easeCurveEndpointHeading(curve, count = 10) {
+  if(curve.length < 3) return curve;
+  const lastIdx = curve.length - 1;
+  const firstIdx = Math.max(0, lastIdx - count);
+  const fromTheta = curve[firstIdx].theta;
+  const toTheta = curve[lastIdx].theta;
+  for(let i = firstIdx + 1; i <= lastIdx; i++) {
+    const t = (i - firstIdx) / (lastIdx - firstIdx);
+    const eased = t * t * (3 - 2 * t);
+    curve[i].theta = normAngle(fromTheta + arcDiff(fromTheta, toTheta) * eased);
+  }
+  return curve;
+}
+
+function targetDistanceFor(maneuver) {
+  return isReverseManeuver(maneuver)
+    ? (RA_FRONT + SPOT_H - RA_BACK) / 2
+    : (RA_BACK + SPOT_H - RA_FRONT) / 2;
+}
+
+function laneFarFromSpotY(sp) {
+  return sp.row === 'bot' ? LANE_TOP + 24 : LANE_BOT - 24;
+}
+
+function markSteering(segs) {
+  for(let i = 1; i < segs.length; i++) {
+    const prev = segs[i - 1];
+    const curr = segs[i];
+    curr.steer = Math.max(-0.64, Math.min(0.64, arcDiff(prev.theta, curr.theta) * 1.8));
+  }
+  for(let pass = 0; pass < 2; pass++) {
+    const nextSteers = segs.map(seg => seg.steer || 0);
+    for(let i = 1; i < segs.length - 1; i++) {
+      if(segs[i - 1].gear !== segs[i].gear || segs[i + 1].gear !== segs[i].gear) continue;
+      nextSteers[i] = (segs[i - 1].steer + segs[i].steer * 2 + segs[i + 1].steer) / 4;
+    }
+    for(let i = 1; i < segs.length - 1; i++) segs[i].steer = nextSteers[i];
+  }
+  segs.forEach(seg => {
+    if(seg.label && seg.label.indexOf('Straight') === 0) seg.steer = 0;
+  });
+  return segs;
+}
+
+function tryVideoPath(segs) {
+  markSteering(segs);
+  return pathClear(segs) ? finalizePath(segs, 7) : null;
+}
+
+function appendKinematicSegment(segs, gear, steer, count, label, step = 3.5) {
+  const start = segs[segs.length - 1];
+  let x = start.x, y = start.y, theta = start.theta;
+  for(let i = 0; i < count; i++) {
+    x += gear * step * Math.cos(theta);
+    y += gear * step * Math.sin(theta);
+    theta = normAngle(theta + gear * step * Math.tan(steer) / WB);
+    segs.push({x, y, theta, gear, steer, label});
+  }
+  return segs;
+}
+
+function appendKinematicTurnToHeading(segs, gear, steer, targetHeading, label, step = 3.5, maxCount = 90) {
+  let prev = Math.abs(arcDiff(segs[segs.length - 1].theta, targetHeading));
+  for(let i = 0; i < maxCount; i++) {
+    appendKinematicSegment(segs, gear, steer, 1, label, step);
+    const curr = Math.abs(arcDiff(segs[segs.length - 1].theta, targetHeading));
+    if(curr < .035 || curr > prev + .01) break;
+    prev = curr;
+  }
+  const last = segs[segs.length - 1];
+  last.theta = targetHeading;
+  return segs;
+}
+
+function appendStraightToPoint(segs, target, gear, label, step = 3.5) {
+  const start = segs[segs.length - 1];
+  const distance = Math.hypot(target.x - start.x, target.y - start.y);
+  const count = Math.max(2, Math.ceil(distance / step));
+  for(let i = 1; i <= count; i++) {
+    const t = i / count;
+    segs.push({
+      x: start.x + (target.x - start.x) * t,
+      y: start.y + (target.y - start.y) * t,
+      theta: target.theta,
+      gear,
+      steer: 0,
+      label
+    });
+  }
+  return segs;
+}
+
+function signedDistanceAlongHeading(from, to, heading) {
+  return (to.x - from.x) * Math.cos(heading) + (to.y - from.y) * Math.sin(heading);
+}
+
+function lateralDistanceToHeadingLine(point, linePoint, heading) {
+  const dx = point.x - linePoint.x;
+  const dy = point.y - linePoint.y;
+  return Math.abs(dx * -Math.sin(heading) + dy * Math.cos(heading));
+}
+
+function reverseDirectStaysInAisle(segs, sp) {
+  const minY = LANE_TOP + CAR_WID * .45;
+  const maxY = LANE_BOT - CAR_WID * .45;
+  for(const seg of segs) {
+    if(seg.label === 'Straight reverse') continue;
+    if(sp.row === 'bot' && seg.y < minY) return false;
+    if(sp.row === 'top' && seg.y > maxY) return false;
+  }
+  return true;
+}
+
+function pathSmoothnessScore(pathData) {
+  if(!pathData) return Infinity;
+  let score = pathData.totalLen * .08;
+  let prevTurn = 0;
+  for(let i = 1; i < pathData.segs.length; i++) {
+    const prev = pathData.segs[i - 1];
+    const curr = pathData.segs[i];
+    const turn = arcDiff(prev.theta, curr.theta);
+    score += Math.abs(turn) * 18;
+    if(Math.abs(turn) > .001 && Math.abs(prevTurn) > .001 && Math.sign(turn) !== Math.sign(prevTurn)) {
+      score += curr.gear === -1 ? 52 : 16;
+    }
+    if(Math.abs(turn) > .16) score += 120;
+    prevTurn = Math.abs(turn) > .001 ? turn : prevTurn;
+  }
+  return score;
+}
+
+function planReverseDirect(sp, target) {
   const start = startPos();
-  const target = targetPose(sp, maneuver);
+  const rowDir = sp.row === 'bot' ? 1 : -1;
+  const pitch = spotPitch();
+  const spotRef = spotAislePoint(sp);
+  const targetHeading = target.theta;
+  const forwardXs = [spotRef.x - pitch * 1.15, spotRef.x - pitch * .92, spotRef.x - pitch * 1.38, spotRef.x - pitch * .68, spotRef.x - pitch * .44, spotRef.x - pitch * .22];
+  const forwardYs = [LANE_MID, LANE_MID + rowDir * 8, LANE_MID + rowDir * 14];
+  const forwardCounts = [4, 8, 12, 16, 20];
+  const reverseSteers = [0.64, 0.58, 0.52, 0.46].map(steer => rowDir * steer);
+  let best = null;
+  let bestScore = Infinity;
+
+  for(const forwardX of forwardXs) {
+    for(const forwardY of forwardYs) {
+      for(const forwardCount of forwardCounts) {
+        for(const reverseSteer of reverseSteers) {
+          const forward = {x: Math.max(34, Math.min(CW - 34, forwardX)), y: forwardY};
+          let segs = buildCurve(start, forward, 0, 0, 1, 'Go forward', Math.max(12, forward.x - start.x), 18, 26);
+          appendKinematicSegment(segs, 1, -rowDir * .62, forwardCount, 'Left-forward', 3.2);
+          appendKinematicTurnToHeading(segs, -1, reverseSteer, targetHeading, 'Right-reverse align', 3.1, 80);
+          const handoff = segs[segs.length - 1];
+          const centerlineError = Math.abs(handoff.x - target.x);
+          const reverseRemaining = -((target.x - handoff.x) * Math.cos(targetHeading) + (target.y - handoff.y) * Math.sin(targetHeading));
+          if(centerlineError > 15 || reverseRemaining < 10 || !reverseDirectStaysInAisle(segs, sp)) continue;
+          appendStraightToPoint(segs, target, -1, 'Straight reverse', 3.2);
+          const path = tryVideoPath(segs);
+          if(path) {
+            let score = pathSmoothnessScore(path);
+            const shift = path.segs.find(seg => seg.gear === -1);
+            if(shift) {
+              score += Math.abs(shift.x - (spotRef.x + pitch * 1.24)) * .4;
+              score += Math.abs(shift.y - (LANE_MID - rowDir * 12)) * .25;
+            }
+            score += centerlineError * 8;
+            score += Math.abs(reverseRemaining - 42) * .8;
+            if(score < bestScore) {
+              best = path;
+              bestScore = score;
+            }
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+function planReverseDirectFallback(sp, target) {
+  const start = startPos();
   const targetHeading = target.theta;
   const rowDir = sp.row === 'bot' ? 1 : -1;
   const pitch = spotPitch();
-  const offsets = maneuver === 'reverse'
-    ? [pitch * .62, pitch * .45, pitch * .8, pitch * .3, pitch]
-    : [-pitch * 1.25, -pitch * 1.05, -pitch * 1.5, -pitch * .85, -pitch * .65];
-  const sideYs = [LANE_MID, LANE_MID - rowDir * 12, LANE_MID + rowDir * 10, LANE_MID - rowDir * 24];
-  const angle = parkingAngleRad();
-  const approachHeadings = maneuver === 'reverse' && angle > 0.01
-    ? [0, -rowDir * angle * .62, -rowDir * angle * .4, -rowDir * angle * .85]
-    : [0];
-  const finalHandleAs = maneuver === 'reverse' && angle > 0.01 ? [56, 82, 100, 120] : [maneuver === 'forward' ? 96 : 56];
-  const finalHandleBs = maneuver === 'reverse' && angle > 0.01 ? [40, 64, 82, 100] : [maneuver === 'forward' ? 34 : 40];
+  const spotRef = spotAislePoint(sp);
+  const offsets = [pitch * .7, pitch * .48, pitch * .92, pitch * .3, pitch * 1.12];
+  const sideYs = [LANE_MID, LANE_MID - rowDir * 10, LANE_MID + rowDir * 10, LANE_MID - rowDir * 22];
 
   for(const offset of offsets) {
     for(const y of sideYs) {
       const stage = {x: Math.max(32, Math.min(CW - 32, target.x + offset)), y};
-      for(const approachHeading of approachHeadings) {
-        const approachHandle = Math.max(12, Math.min(90, stage.x - start.x));
-        const first = buildCurve(start, stage, 0, approachHeading, 1, 'Forward', approachHandle, Math.min(36, approachHandle), 34);
-        const finalGear = maneuver === 'reverse' ? -1 : 1;
-        const label = maneuver === 'reverse' ? 'Reverse' : 'Forward';
-        const finalStartHeading = approachHeading;
-        for(const finalHandleA of finalHandleAs) {
-          for(const finalHandleB of finalHandleBs) {
-            const second = buildCurve(stage, target, finalStartHeading, targetHeading, finalGear, label, finalHandleA, finalHandleB, 52);
-            const segs = first.concat(second.slice(1));
+      const approachHandle = Math.max(12, Math.min(90, stage.x - start.x));
+      const first = buildCurve(start, stage, 0, -rowDir * .34, 1, 'Left-forward', approachHandle, 32, 40);
+      const second = buildCurve(stage, target, -rowDir * .34, targetHeading, -1, 'Right-reverse align', 68, 36, 58);
+      const segs = appendCurve(first, second);
+      const path = tryVideoPath(segs);
+      if(path) return path;
+    }
+  }
 
-            for(let i = 1; i < segs.length; i++) {
-              const prev = segs[i - 1];
-              const curr = segs[i];
-              curr.steer = Math.max(-0.64, Math.min(0.64, arcDiff(prev.theta, curr.theta) * 1.8));
-            }
+  return null;
+}
 
-            if(pathClear(segs)) {
-              return finalizePath(segs, 7);
+function planForwardDirect(sp, target) {
+  const start = startPos();
+  const rowDir = sp.row === 'bot' ? 1 : -1;
+  const pitch = spotPitch();
+  const spotRef = spotAislePoint(sp);
+  const targetHeading = target.theta;
+  const wideYs = [laneFarFromSpotY(sp), LANE_MID - rowDir * 16, LANE_MID - rowDir * 24];
+  const alignXs = [spotRef.x - pitch * 1.18, spotRef.x - pitch, spotRef.x - pitch * 1.42, spotRef.x - pitch * .78];
+
+  for(const alignX of alignXs) {
+    for(const y of wideYs) {
+      const align = {x: Math.max(34, Math.min(CW - 34, alignX)), y};
+      let segs = buildCurve(start, align, 0, 0, 1, 'Wide approach', Math.max(12, align.x - start.x), 24, 26);
+      const turnIn = applyPhaseLabels(
+        buildCurve(align, target, 0, targetHeading, 1, 'Full-right turn', 112, 46, 82),
+        [
+          {until: .68, label: 'Full-right turn'},
+          {until: 1, label: 'Square up'}
+        ]
+      );
+      segs = appendCurve(segs, turnIn);
+      const path = tryVideoPath(segs);
+      if(path) return path;
+    }
+  }
+  return null;
+}
+
+function planReverseAngled(sp, target) {
+  const start = startPos();
+  const rowDir = sp.row === 'bot' ? 1 : -1;
+  const pitch = spotPitch();
+  const spotRef = spotAislePoint(sp);
+  const targetHeading = target.theta;
+  const stopXs = [spotRef.x + pitch * 1.25, spotRef.x + pitch * 1.05, spotRef.x + pitch * 1.48, spotRef.x + pitch * .82];
+  const stopYs = [LANE_MID, laneFarFromSpotY(sp), LANE_MID - rowDir * 8, LANE_MID + rowDir * 6];
+  const reverseSteers = [0.64, 0.58, 0.52, 0.46].map(steer => rowDir * steer);
+  const reverseSteps = [3.1, 2.8, 3.4];
+  let best = null;
+  let bestScore = Infinity;
+
+  for(const stopX of stopXs) {
+    for(const stopY of stopYs) {
+      for(const reverseSteer of reverseSteers) {
+        for(const reverseStep of reverseSteps) {
+          const stop = {x: Math.max(34, Math.min(CW - 34, stopX)), y: stopY};
+          let segs = buildCurve(start, stop, 0, 0, 1, 'Signal and pass space', Math.max(12, stop.x - start.x), 16, 34);
+          const last = segs[segs.length - 1];
+          segs.push({x: last.x, y: last.y, theta: last.theta, gear: 1, steer: 0, label: 'Stop just past space'});
+          appendKinematicTurnToHeading(segs, -1, reverseSteer, targetHeading, 'Reverse into angle', reverseStep, 90);
+          const handoff = segs[segs.length - 1];
+          const centerlineError = lateralDistanceToHeadingLine(handoff, target, targetHeading);
+          const reverseRemaining = -signedDistanceAlongHeading(handoff, target, targetHeading);
+          if(centerlineError > 13 || reverseRemaining < 12 || reverseRemaining > 88) continue;
+          appendStraightToPoint(segs, target, -1, 'Straight reverse', 3.2);
+          const path = tryVideoPath(segs);
+          if(path) {
+            const shift = path.segs.find(seg => seg.gear === -1);
+            let score = pathSmoothnessScore(path) + centerlineError * 12 + Math.abs(reverseRemaining - 38) * .9;
+            if(shift) score += Math.abs(shift.x - (spotRef.x + pitch * 1.1)) * .25;
+            if(score < bestScore) {
+              best = path;
+              bestScore = score;
             }
           }
         }
@@ -395,6 +677,88 @@ function planPathByManeuver(spotIdx, maneuver) {
     }
   }
 
+  if(best) return best;
+
+  const fallbackOffsets = [54, 64, 44, 74];
+  for(const stopX of stopXs) {
+    for(const stopY of stopYs) {
+      for(const reverseOffset of fallbackOffsets) {
+        const stop = {x: Math.max(34, Math.min(CW - 34, stopX)), y: stopY};
+        const reverseStart = {
+          x: target.x + Math.cos(targetHeading) * reverseOffset,
+          y: target.y + Math.sin(targetHeading) * reverseOffset,
+          theta: targetHeading
+        };
+        let segs = buildCurve(start, stop, 0, 0, 1, 'Signal and pass space', Math.max(12, stop.x - start.x), 16, 34);
+        const last = segs[segs.length - 1];
+        segs.push({x: last.x, y: last.y, theta: last.theta, gear: 1, steer: 0, label: 'Stop just past space'});
+        segs = appendCurve(segs, easeCurveEndpointHeading(buildCurve(stop, reverseStart, 0, targetHeading, -1, 'Reverse into angle', 48, 24, 48), 24));
+        segs = appendStraightToPoint(segs, target, -1, 'Straight reverse', 3.2);
+        const path = tryVideoPath(segs);
+        if(path) return path;
+      }
+    }
+  }
+  return null;
+}
+
+function planForwardAngled(sp, target) {
+  const start = startPos();
+  const rowDir = sp.row === 'bot' ? 1 : -1;
+  const pitch = spotPitch();
+  const spotRef = spotAislePoint(sp);
+  const targetHeading = target.theta;
+  const wideYs = [laneFarFromSpotY(sp), LANE_MID - rowDir * 12, LANE_MID - rowDir * 22, LANE_MID + rowDir * 4];
+  const alignXs = [spotRef.x - pitch * .82, spotRef.x - pitch, spotRef.x - pitch * .58, spotRef.x - pitch * 1.2, spotRef.x - pitch * .36, spotRef.x - pitch * 1.48];
+  const approachHandles = [18, 24, 32];
+  const turnHandlesA = [70, 86, 104, 122];
+  const turnHandlesB = [26, 34, 46, 58];
+  let best = null;
+  let bestScore = Infinity;
+
+  for(const alignX of alignXs) {
+    for(const y of wideYs) {
+      for(const approachHandleB of approachHandles) {
+        for(const turnHandleA of turnHandlesA) {
+          for(const turnHandleB of turnHandlesB) {
+            const align = {x: Math.max(34, Math.min(CW - 34, alignX)), y};
+            let segs = buildCurve(start, align, 0, 0, 1, 'Bumper to line', Math.max(12, align.x - start.x), approachHandleB, 28);
+            const turnIn = applyPhaseLabels(
+              buildCurve(align, target, 0, targetHeading, 1, 'Full-right turn', turnHandleA, turnHandleB, 78),
+              [
+                {until: .76, label: 'Full-right turn'},
+                {until: 1, label: 'Straighten ahead'}
+              ]
+            );
+            segs = appendCurve(segs, turnIn);
+            const path = tryVideoPath(segs);
+            if(path) {
+              const score = pathSmoothnessScore(path)
+                + Math.abs(align.x - (spotRef.x - pitch * .8)) * .35
+                + Math.abs(align.y - laneFarFromSpotY(sp)) * .18
+                + Math.abs(turnHandleA - 86) * .08
+                + Math.abs(turnHandleB - 34) * .12;
+              if(score < bestScore) {
+                best = path;
+                bestScore = score;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+function planPathByManeuver(spotIdx, maneuver) {
+  const sp = SPOTS[spotIdx];
+  const normalized = normalizeManeuver(maneuver);
+  const target = targetPose(sp, normalized);
+  if(normalized === 'reverse-direct') return planReverseDirect(sp, target) || planReverseDirectFallback(sp, target);
+  if(normalized === 'forward-direct') return planForwardDirect(sp, target);
+  if(normalized === 'reverse-angled') return planReverseAngled(sp, target);
+  if(normalized === 'forward-angled') return planForwardAngled(sp, target);
   return null;
 }
 
@@ -582,7 +946,8 @@ function drawTick(point, heading, size) {
 }
 
 function drawTurnRuler(pathData, c) {
-  const isReverseParking = maneuver === 'reverse';
+  const normalized = normalizeManeuver(maneuver);
+  const isReverseParking = isReverseManeuver(normalized);
   const eventDistance = Math.min(isReverseParking ? reverseShiftDistance(pathData) : firstTurnDistance(pathData), pathData.totalLen);
   if(eventDistance < .5) return;
 
@@ -660,8 +1025,12 @@ function drawTurnRuler(pathData, c) {
   ctx.textBaseline = 'middle';
   const alongLabel = `${(absX * METERS_PER_UNIT).toFixed(1)} m ${dx >= 0 ? 'right' : 'left'} of center`;
   const outLabel = `${(absY * METERS_PER_UNIT).toFixed(1)} m into aisle`;
-  const eventLabel = isReverseParking ? 'shift reverse' : 'start turn';
-  const pointLabel = 'driver window at marker';
+  const eventLabel = normalized === 'reverse-direct' ? 'shift reverse'
+    : normalized === 'reverse-angled' ? 'straighten & reverse'
+    : 'start turn';
+  const pointLabel = normalized === 'forward-direct' ? 'right mirror at headlight'
+    : normalized === 'forward-angled' ? 'front bumper at line'
+    : 'side mirror at line';
   const lotMargin = (CW - NCOLS * spotPitch()) / 2;
   const labelAnchorY = targetSpot.row === 'bot' ? BOT_Y + SPOT_H * .5 : TOP_Y + SPOT_H * .5;
   const labelAnchorX = spotRef.x < CW / 2 ? CW - lotMargin / 2 : lotMargin / 2;
@@ -760,7 +1129,18 @@ function setAngleFromControl() {
 
 function updateAngleControl() {
   const angleValue = document.getElementById('angle-value');
+  const angleRange = document.getElementById('angle-range');
   if(angleValue) angleValue.textContent = `${parkingAngleDeg}°`;
+  if(angleRange && String(angleRange.value) !== String(parkingAngleDeg)) angleRange.value = String(parkingAngleDeg);
+}
+
+function updateManeuverControl() {
+  maneuver = normalizeManeuver(maneuver);
+  const selMan = document.getElementById('sel-man');
+  const cue = document.getElementById('maneuver-cue');
+  const info = maneuverInfo(maneuver);
+  if(selMan) selMan.value = maneuver;
+  if(cue) cue.textContent = info.cue;
 }
 
 function updateDimensions() {
@@ -798,7 +1178,7 @@ function updateActionControls() {
     btnPause.textContent = isPaused ? 'Resume Parking' : 'Pause Parking';
     if(btnPause.classList) btnPause.classList.toggle('is-paused', isPaused);
   }
-  if(angleRange) angleRange.disabled = isActive;
+  if(angleRange) angleRange.disabled = isActive || !maneuverInfo(maneuver).angled;
   if(selSpot) selSpot.disabled = isActive;
   if(selMan) selMan.disabled = isActive;
   if(btnObs) btnObs.disabled = isActive;
@@ -806,6 +1186,7 @@ function updateActionControls() {
 
 function reset(){
   cancelAnimationFrame(raf); raf=null;
+  updateManeuverControl();
   const s=startPos();
   car={x:s.x,y:s.y,heading:s.heading,steerAngle:0};
   traj=[]; path=null; dist=0; state='idle'; lastT=null;
@@ -905,7 +1286,17 @@ CV.addEventListener('mousedown', e => {
 });
 
 document.getElementById('sel-spot').onchange=e=>{targetIdx=parseInt(e.target.value); obstacles.delete(targetIdx); if(state==='idle'||state==='done'){path=null;reset();}};
-document.getElementById('sel-man').onchange=e=>{maneuver=e.target.value; if(state==='idle'||state==='done'){path=null;reset();}};
+document.getElementById('sel-man').onchange=e=>{
+  maneuver=normalizeManeuver(e.target.value);
+  const info = maneuverInfo(maneuver);
+  if(info.angled && parkingAngleDeg === 0) parkingAngleDeg = info.defaultAngle || 35;
+  if(!info.angled) parkingAngleDeg = 0;
+  const angleRange = document.getElementById('angle-range');
+  if(angleRange) angleRange.value = String(parkingAngleDeg);
+  updateAngleControl();
+  updateManeuverControl();
+  if(state==='idle'||state==='done'){path=null;reset();}
+};
 document.getElementById('angle-range').addEventListener('input', setAngleFromControl);
 document.getElementById('angle-range').addEventListener('change', setAngleFromControl);
 document.getElementById('speed-range').addEventListener('input', setSpeedFromControl);
@@ -920,6 +1311,7 @@ document.getElementById('btn-pause').onclick=togglePause;
 document.getElementById('btn-reset').onclick=reset;
 
 updateAngleControl();
+updateManeuverControl();
 updateDimensions();
 setSpeedFromControl();
 reset();

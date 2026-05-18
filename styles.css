@@ -48,6 +48,7 @@ select, button { width: 100%; padding: 6px 8px; font-size: 12px; border-radius: 
 button { margin-top: 4px; transition: 0.1s; }
 button:hover { filter: brightness(1.08); }
 button:active { transform: scale(.98); }
+#maneuver-cue { min-height: 30px; margin-top: 6px; font-size: 11px; line-height: 1.35; color: var(--color-text-secondary); }
 .dimensions { display: grid; gap: 4px; font-size: 11px; }
 .dimensions div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
 .dimensions div:last-child { border-bottom: 0; }

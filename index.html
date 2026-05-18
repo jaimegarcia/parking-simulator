@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>2D Parking Simulator - Smart Adaptive AI</title>
-<link rel="stylesheet" href="styles.css?v=20260517">
+<link rel="stylesheet" href="styles.css?v=20260518c">
 </head>
 <body>
 <div id="app">
@@ -25,9 +25,12 @@
       </select>
       <div class="cl cl-spaced">Maneuver</div>
       <select id="sel-man">
-        <option value="reverse">Reverse Perpendicular</option>
-        <option value="forward">Forward Pull-In</option>
+        <option value="reverse-direct">Reverse Direct</option>
+        <option value="forward-direct">Forward Direct</option>
+        <option value="reverse-angled">Reverse Angled</option>
+        <option value="forward-angled">Front Angled</option>
       </select>
+      <div id="maneuver-cue">Mirror to boundary, swing out, reverse in.</div>
       <div class="value-row">
         <label class="cl cl-spaced" for="angle-range">Lot Angle</label>
         <div class="control-value" id="angle-value">0°</div>
@@ -74,6 +77,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260517"></script>
+<script src="app.js?v=20260518c"></script>
 </body>
 </html>
