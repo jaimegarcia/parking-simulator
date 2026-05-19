@@ -216,6 +216,18 @@ for (const scenario of expectedPhases) {
       : Infinity;
     if (handoffAngle > 0.18) phaseFailures.push({ ...scenario, reason: 'straight reverse starts before car is parallel', handoffAngle });
   }
+  if (scenario.maneuver === 'forward-direct') {
+    const square = path?.segs.filter(seg => seg.label === 'Square up') || [];
+    const maxSteer = square.reduce((max, seg) => Math.max(max, Math.abs(seg.steer || 0)), 0);
+    if (maxSteer > 0.02) phaseFailures.push({ ...scenario, reason: 'square-up final leg steers', maxSteer });
+    const firstSquareIdx = path?.segs.findIndex(seg => seg.label === 'Square up') ?? -1;
+    const handoff = firstSquareIdx > 0 ? path.segs[firstSquareIdx - 1] : null;
+    const target = api.targetPose(api.SPOTS[scenario.target], scenario.maneuver);
+    const handoffAngle = handoff
+      ? Math.abs(Math.atan2(Math.sin(handoff.theta - target.theta), Math.cos(handoff.theta - target.theta)))
+      : Infinity;
+    if (handoffAngle > 0.18) phaseFailures.push({ ...scenario, reason: 'square-up starts before car is parallel', handoffAngle });
+  }
 }
 
 if (failures.length) {

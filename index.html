@@ -3,13 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>2D Parking Simulator - Smart Adaptive AI</title>
-<link rel="stylesheet" href="styles.css?v=20260518c">
+<link rel="stylesheet" href="styles.css?v=20260519a">
 </head>
 <body>
 <div id="app">
-  <h1><span>2D Parking Simulator</span> <span class="hint">Click spots to toggle obstacles</span></h1>
+  <h1><span>2D Parking Simulator</span> <span class="hint">Select a target, add parked cars, then start.</span></h1>
   <canvas id="pc"></canvas>
+  <div id="instructions" aria-label="Simulator instructions">
+    <span>Choose the target spot from the menu.</span>
+    <span>Click any other spot to add or remove a parked car.</span>
+    <span>Use Lot Angle for angled maneuvers, then start auto-park.</span>
+  </div>
   <div id="controls">
     <div class="cg">
       <div class="cl">Target Spot</div>
@@ -30,7 +38,7 @@
         <option value="reverse-angled">Reverse Angled</option>
         <option value="forward-angled">Front Angled</option>
       </select>
-      <div id="maneuver-cue">Mirror to boundary, swing out, reverse in.</div>
+      <div id="maneuver-cue">Mirror to boundary, swing left until the corner shows, then reverse right and straighten.</div>
       <div class="value-row">
         <label class="cl cl-spaced" for="angle-range">Lot Angle</label>
         <div class="control-value" id="angle-value">0°</div>
@@ -77,6 +85,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260518c"></script>
+<script src="app.js?v=20260519a"></script>
 </body>
 </html>
